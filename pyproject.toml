@@ -1,0 +1,45 @@
+[project]
+name = "fl2000-re"
+version = "0.1.0"
+description = "Userspace reverse-engineering probe for Fresco Logic FL2000DX / Hagibis USB display adapters"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [{ name = "Matheus Puppe" }]
+dependencies = ["pyusb>=1.2", "numpy>=2.0"]
+
+[project.optional-dependencies]
+mirror = ["pillow>=10", "mss>=9"]
+dev = [
+  "pytest>=8",
+  "ruff>=0.9",
+  "pre-commit>=4",
+  "pillow>=10",
+  "mss>=9",
+]
+
+[project.scripts]
+hagibis-re = "hagibis_re:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+py-modules = ["hagibis_re"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+src = ["."]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "SIM"]
+ignore = ["E501"]
+
+[tool.ruff.format]
+quote-style = "double"

@@ -1,0 +1,12 @@
+{
+  "name": "fl2000-re",
+  "private": true,
+  "description": "Prettier for markdown, JSON, and YAML in fl2000-re",
+  "scripts": {
+    "format": "prettier --write .",
+    "format:check": "prettier --check ."
+  },
+  "devDependencies": {
+    "prettier": "^3.5.3"
+  }
+}
