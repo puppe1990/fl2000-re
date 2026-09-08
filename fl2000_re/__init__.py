@@ -12,6 +12,7 @@ from fl2000_re.pixels import (
 from fl2000_re.video_modes import (
     MODE_640x360,
     MODE_640x480,
+    MODE_720x480,
     MODE_800x600,
     MODE_1280x720,
     VideoMode,
@@ -29,6 +30,7 @@ __all__ = [
     "MODE_1280x720",
     "MODE_640x360",
     "MODE_640x480",
+    "MODE_720x480",
     "MODE_800x600",
     "VideoMode",
     "decode_status",

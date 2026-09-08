@@ -62,8 +62,8 @@ tests/test_<module>.py    mirrors the package
 
 ## Hardware caveats (do not "simplify" these away)
 
-- Default clone is 640x480 RGB565 @ 60 Hz. 720p RGB565 overruns USB 2.0. 800x600 RGB332 clocks at 60
-  Hz but the Dell never locks a picture.
+- Default clone is 720x480 RGB565 @ 60 Hz (CEA 480p 16:9). 640x480 4:3 is stretched on the Dell
+  16:9. 720p RGB565 overruns USB 2.0. 800x600 RGB332 never locked.
 - REG_ACLK bit 28 must stay set (EOF = ZLP) or bulk NAKs forever.
 - Kill the mirror by exact PID. Never `pkill -f hagibis_re.py`.
 - After Access denied / claim fail: unplug the Hagibis USB-A, then `diskutil unmountDisk` the
