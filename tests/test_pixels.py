@@ -1,8 +1,13 @@
 """Pixel packing for the FL2000 bulk stream."""
 
 import pytest
-
-from hagibis_re import dword_swap_frame, rgb888_to_rgb565
+from fl2000_re.pixels import (
+    dword_swap_frame,
+    needs_zlp,
+    pack_frame,
+    rgb888_to_rgb332,
+    rgb888_to_rgb565,
+)
 
 
 def test_white_is_ffff():
@@ -38,69 +43,39 @@ def test_rgb888_rejects_odd_length():
 
 
 def test_640x480_rgb565_needs_zlp():
-    from hagibis_re import needs_zlp
-
     assert needs_zlp(640 * 480 * 2)
 
 
 def test_short_packet_does_not_need_zlp():
-    from hagibis_re import needs_zlp
-
     assert not needs_zlp(513)
 
 
 def test_red_rgb332():
-    from hagibis_re import rgb888_to_rgb332
-
     assert rgb888_to_rgb332(bytes([255, 0, 0])) == bytes([0xE0])
 
 
 def test_white_rgb332():
-    from hagibis_re import rgb888_to_rgb332
-
     assert rgb888_to_rgb332(bytes([255, 255, 255])) == bytes([0xFF])
 
 
 def test_green_rgb332():
-    from hagibis_re import rgb888_to_rgb332
-
     assert rgb888_to_rgb332(bytes([0, 255, 0])) == bytes([0x1C])
 
 
 def test_blue_rgb332():
-    from hagibis_re import rgb888_to_rgb332
-
     assert rgb888_to_rgb332(bytes([0, 0, 255])) == bytes([0x03])
 
 
 def test_rgb332_rejects_odd_length():
-    from hagibis_re import rgb888_to_rgb332
-
     with pytest.raises(ValueError, match="multiple of 3"):
         rgb888_to_rgb332(bytes([1, 2]))
 
 
 def test_pack_frame_rgb332_dword_swaps():
-    from hagibis_re import dword_swap_frame, pack_frame
-
     rgb = bytes([255, 0, 0]) * 8
     assert pack_frame(rgb, 1) == dword_swap_frame(bytes([0xE0] * 8))
 
 
 def test_pack_frame_rgb565_dword_swaps():
-    from hagibis_re import dword_swap_frame, pack_frame, rgb888_to_rgb565
-
     rgb = bytes([255, 0, 0]) * 4
     assert pack_frame(rgb, 2) == dword_swap_frame(rgb888_to_rgb565(rgb))
-
-
-def test_rgb332_uses_pxclk_bit_25():
-    from hagibis_re import pxclk_color_bit
-
-    assert pxclk_color_bit(1) == 25
-
-
-def test_rgb565_uses_pxclk_bit_6():
-    from hagibis_re import pxclk_color_bit
-
-    assert pxclk_color_bit(2) == 6
