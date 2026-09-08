@@ -22,8 +22,8 @@ from __future__ import annotations
 
 import argparse
 import contextlib
+import multiprocessing as mp
 import sys
-import threading
 import time
 from dataclasses import dataclass
 
@@ -492,14 +492,13 @@ def bring_up_hdmi(fl: FL2000, mode: VideoMode) -> int:
 
     for bit in (22, 24, 19, 21, 13, 27, 28, 29):
         fl.bit_clear(REG_ACLK, bit)
-    fl.bit_set(REG_ACLK, 28)
+    fl.bit_set(REG_ACLK, 28)  # EOF = ZLP; required or bulk NAKs forever
 
     for bit in (28, 6, 31, 24, 25, 26, 27):
         fl.bit_clear(REG_PXCLK, bit)
     fl.bit_set(REG_PXCLK, 0)
     fl.bit_set(REG_PXCLK, 6)
     fl.bit_set(REG_PXCLK, 7)
-    fl.bit_set(REG_PXCLK, 27)  # disable_halt: don't blank on a late USB frame
 
     for off, val in (
         (REG_HSYNC1, mode.h_sync_1),
@@ -590,15 +589,11 @@ def ite_enable_video(ite: IT66121, mode: VideoMode) -> None:
 
 
 def send_frame(fl: FL2000, frame: bytes) -> None:
-    fl.dev.write(BULK_EP, frame, timeout=5000)
+    fl.dev.write(BULK_EP, frame, timeout=2000)
     if not needs_zlp(len(frame)):
         return
-    for timeout in (200, 500, 1000):
-        try:
-            fl.dev.write(BULK_EP, b"", timeout=timeout)
-            return
-        except usb.core.USBError:
-            continue
+    with contextlib.suppress(usb.core.USBError):
+        fl.dev.write(BULK_EP, b"", timeout=50)
 
 
 def release_bulk(fl: FL2000) -> None:
@@ -636,6 +631,21 @@ def _grab_resized_rgb(sct, mon, width: int, height: int) -> bytes:
     return fit_rgb888(shot.rgb, shot.width, shot.height, width, height)
 
 
+def _capture_worker(width: int, height: int, monitor: int, shm, n: int, counter, stop) -> None:
+    """Fill shm with a packed HDMI frame; never touches USB."""
+    import mss
+
+    sct = mss.MSS()
+    mon = sct.monitors[monitor]
+    buf = shm.get_obj() if hasattr(shm, "get_obj") else shm
+    while not stop.is_set():
+        packed = dword_swap_frame(rgb888_to_rgb565(_grab_resized_rgb(sct, mon, width, height)))
+        if len(packed) != n:
+            continue
+        buf[:n] = packed
+        counter.value += 1
+
+
 def cmd_mirror(fl: FL2000, seconds: float, monitor: int) -> int:
     mode = default_mirror_mode()
     print(f"== espelho da tela → HDMI {mode.width}x{mode.height} ==")
@@ -660,39 +670,31 @@ def cmd_mirror(fl: FL2000, seconds: float, monitor: int) -> int:
         )
         return 1
 
-    packed = dword_swap_frame(rgb888_to_rgb565(rgb))
+    frame = dword_swap_frame(rgb888_to_rgb565(rgb))
     if bring_up_hdmi(fl, mode) != 0:
         return 1
 
-    latest = [packed]
-    stop = threading.Event()
-    captured = [1]
-    sent = [0]
-
-    def capturer() -> None:
-        while not stop.is_set():
-            t_cap_start = time.monotonic()
-            try:
-                raw = _grab_resized_rgb(sct, mon, mode.width, mode.height)
-                latest[0] = dword_swap_frame(rgb888_to_rgb565(raw))
-                captured[0] += 1
-            except Exception as exc:
-                print(f"  capture erro: {exc}")
-            leftover = 1 / 12 - (time.monotonic() - t_cap_start)
-            if leftover > 0:
-                time.sleep(leftover)
-
-    t_cap = threading.Thread(target=capturer, daemon=True)
-    t_cap.start()
+    n = len(frame)
+    shm = mp.Array("B", frame, lock=False)
+    counter = mp.Value("i", 1)
+    stop = mp.Event()
+    proc = mp.Process(
+        target=_capture_worker,
+        args=(mode.width, mode.height, monitor, shm, n, counter, stop),
+        daemon=True,
+    )
+    proc.start()
     print("  espelhando — Ctrl+C para parar. Olhe o HDMI do HAGIBIS.")
+    sent = 0
     t0 = time.monotonic()
     end_at = None if seconds <= 0 else t0 + seconds
     period = 1.0 / mode.freq
     next_tick = t0
+    raw_out = shm.get_obj() if hasattr(shm, "get_obj") else shm
     try:
         while end_at is None or time.monotonic() < end_at:
-            send_frame(fl, latest[0])
-            sent[0] += 1
+            send_frame(fl, bytes(raw_out))
+            sent += 1
             next_tick += period
             delay = next_tick - time.monotonic()
             if delay > 0:
@@ -705,13 +707,14 @@ def cmd_mirror(fl: FL2000, seconds: float, monitor: int) -> int:
         print(f"  bulk erro: {exc}")
     finally:
         stop.set()
+        proc.join(timeout=1)
         dt = max(0.001, time.monotonic() - t0)
         print(
-            f"  USB {sent[0] / dt:.1f} fps, captura {captured[0] / dt:.1f} fps "
-            f"({sent[0]} frames / {dt:.1f}s)"
+            f"  USB {sent / dt:.1f} fps, captura {counter.value / dt:.1f} fps "
+            f"({sent} frames / {dt:.1f}s)"
         )
         release_bulk(fl)
-    return 0 if sent[0] else 1
+    return 0 if sent else 1
 
 
 def main() -> int:
