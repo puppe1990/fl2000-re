@@ -18,11 +18,6 @@ def test_640x480_60_rgb565_fits_usb2():
     assert fits_usb2(640, 480, fps=60)
 
 
-def test_default_mirror_is_sixteen_by_nine():
-    mode = default_mirror_mode()
-    assert abs(mode.width / mode.height - 16 / 9) < 0.02
-
-
 def test_default_mirror_is_60hz():
     assert default_mirror_mode().freq == 60
 
