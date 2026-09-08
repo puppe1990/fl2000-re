@@ -334,14 +334,30 @@ def make_bars(width: int, height: int) -> bytes:
 
 def dword_swap_frame(buf: bytes) -> bytes:
     """FL2000 bulk stream is 64-bit words with 32-bit halves reversed."""
-    out = bytearray(len(buf))
-    for i in range(0, len(buf) - 7, 8):
-        out[i : i + 4] = buf[i + 4 : i + 8]
-        out[i + 4 : i + 8] = buf[i : i + 4]
-    rem = len(buf) % 8
-    if rem:
-        out[-rem:] = buf[-rem:]
-    return bytes(out)
+    try:
+        import numpy as np
+
+        n = (len(buf) // 8) * 8
+        if n:
+            words = np.frombuffer(buf[:n], dtype=np.uint32).reshape(-1, 2)[:, ::-1]
+            swapped = words.reshape(-1).tobytes()
+        else:
+            swapped = b""
+        return swapped + buf[n:]
+    except ImportError:
+        out = bytearray(len(buf))
+        for i in range(0, len(buf) - 7, 8):
+            out[i : i + 4] = buf[i + 4 : i + 8]
+            out[i + 4 : i + 8] = buf[i : i + 4]
+        rem = len(buf) % 8
+        if rem:
+            out[-rem:] = buf[-rem:]
+        return bytes(out)
+
+
+def needs_zlp(nbytes: int, max_packet: int = 512) -> bool:
+    """USB bulk EOF: a max-packet-aligned payload needs an explicit zero-length packet."""
+    return nbytes > 0 and nbytes % max_packet == 0
 
 
 @dataclass(frozen=True)
@@ -483,6 +499,7 @@ def bring_up_hdmi(fl: FL2000, mode: VideoMode) -> int:
     fl.bit_set(REG_PXCLK, 0)
     fl.bit_set(REG_PXCLK, 6)
     fl.bit_set(REG_PXCLK, 7)
+    fl.bit_set(REG_PXCLK, 27)  # disable_halt: don't blank on a late USB frame
 
     for off, val in (
         (REG_HSYNC1, mode.h_sync_1),
@@ -574,8 +591,14 @@ def ite_enable_video(ite: IT66121, mode: VideoMode) -> None:
 
 def send_frame(fl: FL2000, frame: bytes) -> None:
     fl.dev.write(BULK_EP, frame, timeout=5000)
-    with contextlib.suppress(usb.core.USBError):
-        fl.dev.write(BULK_EP, b"", timeout=500)
+    if not needs_zlp(len(frame)):
+        return
+    for timeout in (200, 500, 1000):
+        try:
+            fl.dev.write(BULK_EP, b"", timeout=timeout)
+            return
+        except usb.core.USBError:
+            continue
 
 
 def release_bulk(fl: FL2000) -> None:
@@ -648,23 +671,34 @@ def cmd_mirror(fl: FL2000, seconds: float, monitor: int) -> int:
 
     def capturer() -> None:
         while not stop.is_set():
+            t_cap_start = time.monotonic()
             try:
                 raw = _grab_resized_rgb(sct, mon, mode.width, mode.height)
                 latest[0] = dword_swap_frame(rgb888_to_rgb565(raw))
                 captured[0] += 1
             except Exception as exc:
                 print(f"  capture erro: {exc}")
-                time.sleep(0.05)
+            leftover = 1 / 12 - (time.monotonic() - t_cap_start)
+            if leftover > 0:
+                time.sleep(leftover)
 
     t_cap = threading.Thread(target=capturer, daemon=True)
     t_cap.start()
     print("  espelhando — Ctrl+C para parar. Olhe o HDMI do HAGIBIS.")
     t0 = time.monotonic()
-    deadline = None if seconds <= 0 else t0 + seconds
+    end_at = None if seconds <= 0 else t0 + seconds
+    period = 1.0 / mode.freq
+    next_tick = t0
     try:
-        while deadline is None or time.monotonic() < deadline:
+        while end_at is None or time.monotonic() < end_at:
             send_frame(fl, latest[0])
             sent[0] += 1
+            next_tick += period
+            delay = next_tick - time.monotonic()
+            if delay > 0:
+                time.sleep(delay)
+            elif delay < -period:
+                next_tick = time.monotonic()
     except KeyboardInterrupt:
         pass
     except usb.core.USBError as exc:
