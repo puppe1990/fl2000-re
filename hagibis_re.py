@@ -358,6 +358,21 @@ class VideoMode:
     pixclk: int
 
 
+# 640x480 RGB565 @ 60 Hz was measured at a full 60 fps on this dongle (~37 MB/s).
+USB2_BUDGET_BPS = 40_000_000
+
+
+def fits_usb2(
+    width: int,
+    height: int,
+    fps: float = 60,
+    bpp: int = 2,
+    budget: int = USB2_BUDGET_BPS,
+) -> bool:
+    """True if RGB frames at fps fit the measured USB 2.0 bulk budget (~32 MB/s)."""
+    return width * height * bpp * fps <= budget
+
+
 def encode_hsync1(hactive: int, htotal: int) -> int:
     return (hactive << 16) | htotal
 
@@ -380,6 +395,7 @@ MODE_640x480 = VideoMode(
 )
 
 # CEA-861 1280x720@60 + official HDMI v_sync_reg_2 tweak (0x1A5001A).
+# Too wide for USB 2.0 at 60 Hz (needs ~110 MB/s); kept for experiments.
 MODE_1280x720 = VideoMode(
     width=1280,
     height=720,
@@ -393,16 +409,31 @@ MODE_1280x720 = VideoMode(
     pixclk=1650 * 750 * 60,
 )
 
+# 16:9 square pixels at the same 25.2 MHz / 60 Hz VGA clock the chip already
+# sustains. 1920x1080 is exactly 3x this, so the Dell scales evenly.
+MODE_640x360 = VideoMode(
+    width=640,
+    height=360,
+    freq=60,
+    h_sync_1=0x2800320,
+    h_sync_2=0x600091,
+    v_sync_1=encode_vsync1(360, 525),
+    v_sync_2=0x09C2009C,
+    pll=0x003F6119,
+    vic=0,
+    pixclk=800 * 525 * 60,
+)
+
 
 def default_mirror_mode() -> VideoMode:
-    return MODE_1280x720
+    return MODE_640x360
 
 
 def resize_rgb888(src: bytes, src_w: int, src_h: int, dst_w: int, dst_h: int) -> bytes:
     from PIL import Image
 
     img = Image.frombytes("RGB", (src_w, src_h), src)
-    return img.resize((dst_w, dst_h), Image.Resampling.LANCZOS).tobytes()
+    return img.resize((dst_w, dst_h), Image.Resampling.BOX).tobytes()
 
 
 def bring_up_hdmi(fl: FL2000, mode: VideoMode) -> int:
@@ -458,8 +489,15 @@ def bring_up_hdmi(fl: FL2000, mode: VideoMode) -> int:
     ite_av_mute(ite, 0)
     print("  IT66121 video output ligado")
 
-    usb.util.claim_interface(fl.dev, 0)
-    fl.dev.set_interface_altsetting(0, 1)
+    try:
+        with contextlib.suppress(usb.core.USBError):
+            usb.util.claim_interface(fl.dev, 0)
+        fl.dev.set_interface_altsetting(0, 1)
+    except usb.core.USBError as exc:
+        print(
+            f"  USB claim falhou ({exc}). Desconecta e reconecta o USB-A do HAGIBIS e rode de novo."
+        )
+        return 1
     with contextlib.suppress(usb.core.USBError):
         fl.dev.clear_halt(BULK_EP)
     return 0
@@ -478,7 +516,8 @@ def ite_av_mute(ite: IT66121, mute: int) -> None:
 def ite_send_avi_infoframe(ite: IT66121, mode: VideoMode) -> None:
     db = [0] * 13
     db[0] = 1 << 4
-    if mode.vic in (4, 16):
+    wide = mode.vic in (4, 16) or mode.width / mode.height > 1.6
+    if wide:
         db[1] = 8 | (2 << 4) | (2 << 6)
     else:
         db[1] = 8 | (1 << 4) | (1 << 6)

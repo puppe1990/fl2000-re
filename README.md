@@ -10,7 +10,9 @@ transmitter — not DisplayLink, and not a native extra macOS display.
 - IT66121 on I2C `0x4C` (vendor `0x4954`, device `0x612`)
 - EDID from the HDMI sink
 - color bars **640×480 @ 60 fps** (RGB565, USB 2.0)
-- **mirror** the Mac screen onto that HDMI at **1280×720** (`mirror`)
+- **mirror** the Mac screen onto that HDMI at **640×360 16:9 @ 60 Hz** (`mirror`). 1280×720 @ 60 Hz
+  needs ~110 MB/s; USB 2.0 on this dongle only sustains ~40 MB/s, so 720p starved the scanout and
+  looked worse than 640×480.
 
 Plug **one** HDMI cable into the Hagibis. One FL2000 chip = one output.
 

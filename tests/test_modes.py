@@ -1,23 +1,35 @@
-"""Mirror output must be 16:9 HD, not 640x480 stretched on a 1080p panel."""
+"""Mirror must be 16:9 at 60 Hz and fit USB 2.0, or the Dell smears."""
 
 from hagibis_re import (
     MODE_1280x720,
     default_mirror_mode,
     encode_hsync1,
     encode_vsync1,
+    fits_usb2,
     resize_rgb888,
 )
 
 
-def test_default_mirror_mode_is_720p():
-    mode = default_mirror_mode()
-    assert mode.width == 1280
-    assert mode.height == 720
+def test_720p60_rgb565_does_not_fit_usb2():
+    assert not fits_usb2(1280, 720, fps=60)
 
 
-def test_720p_is_sixteen_by_nine():
+def test_640x480_60_rgb565_fits_usb2():
+    assert fits_usb2(640, 480, fps=60)
+
+
+def test_default_mirror_is_sixteen_by_nine():
     mode = default_mirror_mode()
-    assert mode.width / mode.height == 16 / 9
+    assert abs(mode.width / mode.height - 16 / 9) < 0.02
+
+
+def test_default_mirror_is_60hz():
+    assert default_mirror_mode().freq == 60
+
+
+def test_default_mirror_fits_usb2():
+    mode = default_mirror_mode()
+    assert fits_usb2(mode.width, mode.height, fps=mode.freq)
 
 
 def test_encode_hsync1_packs_active_and_total():
