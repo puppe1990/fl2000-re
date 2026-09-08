@@ -60,8 +60,10 @@ def test_fit_letterbox_stays_black_after_sharpen():
     assert out[0:3] == bytes([0, 0, 0])
 
 
-def test_fit_center_crops_when_source_covers_double_dest():
-    """1710x1107 covers 1280x960; crop then exact 2x so glyphs stay on pixel grid."""
-    src = bytes([255, 0, 0]) * (5 * 4)
-    out = fit_rgb888(src, 5, 4, 2, 2)
-    assert out[-3:] == bytes([255, 0, 0])
+def test_fit_keeps_left_edge_when_source_is_wider_than_2x_dest():
+    """Air 3:2 into 640x480 must letterbox, not center-crop 1280x960 (IMG_2117)."""
+    width, height, dst_w, dst_h = 17, 11, 6, 4
+    row = bytes([255, 255, 255]) + bytes(3 * (width - 1))
+    src = row * height
+    out = fit_rgb888(src, width, height, dst_w, dst_h)
+    assert max(out) > 100
