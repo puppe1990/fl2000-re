@@ -1,6 +1,6 @@
-"""Mirror must be 16:9 at 60 Hz and fit USB 2.0, or the Dell smears."""
+"""Mirror must fit USB 2.0 at 60 Hz or the Dell smears."""
 
-from hagibis_re import (
+from fl2000_re.video_modes import (
     MODE_640x480,
     MODE_800x600,
     MODE_1280x720,
@@ -9,7 +9,7 @@ from hagibis_re import (
     encode_vsync1,
     fits_usb2,
     pll_pixel_clock,
-    resize_rgb888,
+    pxclk_color_bit,
 )
 
 
@@ -74,14 +74,9 @@ def test_720p_hdmi_tweak_vsync2():
     assert MODE_1280x720.v_sync_2 == 0x01A5001A
 
 
-def test_resize_rgb888_output_size():
-    src = bytes([10, 20, 30]) * (64 * 48)
-    out = resize_rgb888(src, 64, 48, 1280, 720)
-    assert len(out) == 1280 * 720 * 3
+def test_rgb332_uses_pxclk_bit_25():
+    assert pxclk_color_bit(1) == 25
 
 
-def test_resize_rgb888_keeps_solid_color():
-    src = bytes([255, 0, 0]) * (8 * 8)
-    out = resize_rgb888(src, 8, 8, 16, 16)
-    assert out[0:3] == bytes([255, 0, 0])
-    assert out[-3:] == bytes([255, 0, 0])
+def test_rgb565_uses_pxclk_bit_6():
+    assert pxclk_color_bit(2) == 6

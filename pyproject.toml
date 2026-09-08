@@ -19,7 +19,7 @@ dev = [
 ]
 
 [project.scripts]
-hagibis-re = "hagibis_re:main"
+hagibis-re = "fl2000_re.cli:main"
 
 [build-system]
 requires = ["setuptools>=68"]
@@ -27,6 +27,7 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
 py-modules = ["hagibis_re"]
+packages = ["fl2000_re"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -35,7 +36,7 @@ python_files = ["test_*.py"]
 [tool.ruff]
 line-length = 100
 target-version = "py311"
-src = ["."]
+src = ["fl2000_re", "tests"]
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "UP", "B", "SIM"]
