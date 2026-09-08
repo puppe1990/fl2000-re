@@ -35,3 +35,15 @@ def test_dword_swap_reverses_32bit_halves():
 def test_rgb888_rejects_odd_length():
     with pytest.raises(ValueError, match="multiple of 3"):
         rgb888_to_rgb565(bytes([1, 2]))
+
+
+def test_640x480_rgb565_needs_zlp():
+    from hagibis_re import needs_zlp
+
+    assert needs_zlp(640 * 480 * 2)
+
+
+def test_short_packet_does_not_need_zlp():
+    from hagibis_re import needs_zlp
+
+    assert not needs_zlp(513)
