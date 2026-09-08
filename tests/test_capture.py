@@ -22,3 +22,21 @@ def test_mss_hidpi_options_drop_nominal_resolution():
     opts = mss_hidpi_image_options()
     assert opts & darwin.kCGWindowImageNominalResolution == 0
     assert opts & darwin.kCGWindowImageShouldBeOpaque
+
+
+def test_grab_cg_display_rgb_uses_injected_bounds_and_region():
+    from fl2000_re.capture import grab_cg_display_rgb
+
+    src = bytes([1, 2, 3]) * (4 * 2)
+
+    def bounds_of(display_id: int) -> tuple[int, int, int, int]:
+        assert display_id == 7
+        return (100, 20, 4, 2)
+
+    def grab_bounds(left: int, top: int, width: int, height: int) -> tuple[bytes, int, int]:
+        assert (left, top, width, height) == (100, 20, 4, 2)
+        return src, 4, 2
+
+    rgb, width, height = grab_cg_display_rgb(7, bounds_of=bounds_of, grab_bounds=grab_bounds)
+    assert (width, height) == (4, 2)
+    assert rgb == src

@@ -6,15 +6,22 @@ import argparse
 
 from fl2000_re.fl2000_usb import FL2000, DongleNotFoundError
 from fl2000_re.probe import cmd_detect, cmd_dump, cmd_edid
-from fl2000_re.stream import cmd_bars, cmd_mirror
+from fl2000_re.stream import cmd_bars, cmd_extend, cmd_mirror
+
+
+def build_parser() -> argparse.ArgumentParser:
+    ap = argparse.ArgumentParser(description="Hagibis FL2000 reverse-engineering probe")
+    ap.add_argument(
+        "cmd",
+        choices=["dump", "detect", "edid", "bars", "mirror", "extend", "all"],
+    )
+    ap.add_argument("--seconds", type=float, default=8.0, help="0 = ate Ctrl+C (mirror/extend)")
+    ap.add_argument("--monitor", type=int, default=1, help="indice mss do display (1=principal)")
+    return ap
 
 
 def main() -> int:
-    ap = argparse.ArgumentParser(description="Hagibis FL2000 reverse-engineering probe")
-    ap.add_argument("cmd", choices=["dump", "detect", "edid", "bars", "mirror", "all"])
-    ap.add_argument("--seconds", type=float, default=8.0, help="0 = ate Ctrl+C (so mirror)")
-    ap.add_argument("--monitor", type=int, default=1, help="indice mss do display (1=principal)")
-    args = ap.parse_args()
+    args = build_parser().parse_args()
     try:
         fl = FL2000()
     except DongleNotFoundError as exc:
@@ -22,6 +29,8 @@ def main() -> int:
         return 1
     if args.cmd == "mirror":
         return cmd_mirror(fl, args.seconds, args.monitor)
+    if args.cmd == "extend":
+        return cmd_extend(fl, args.seconds)
     rc = 0
     if args.cmd in ("dump", "all"):
         cmd_dump(fl)

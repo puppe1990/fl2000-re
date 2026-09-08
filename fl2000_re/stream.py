@@ -9,7 +9,12 @@ import time
 import usb.core
 import usb.util
 
-from fl2000_re.capture import grab_letterboxed_rgb
+from fl2000_re.capture import (
+    Grabber,
+    grab_cg_display_rgb,
+    grab_letterboxed_rgb,
+    grab_main_display_rgb,
+)
 from fl2000_re.fl2000_usb import FL2000
 from fl2000_re.hdmi import bring_up_hdmi
 from fl2000_re.pixels import dword_swap_frame, make_bars_rgb565, needs_zlp, pack_frame
@@ -41,17 +46,25 @@ def cmd_bars(fl: FL2000, seconds: float) -> int:
 
 
 def hdmi_capture_worker(
-    width: int, height: int, bpp: int, _monitor: int, shm, n: int, counter, stop
+    width: int, height: int, bpp: int, display_id: int | None, shm, n: int, counter, stop
 ) -> None:
-    """Fill shm with a packed HDMI frame; never touches USB."""
+    """Fill shm with a packed HDMI frame; never touches USB.
+
+    display_id is a CGDirectDisplayID for extend, or None to clone the Air.
+    """
     # Array(..., lock=False) has no get_obj() on some Python builds.
     buf = shm.get_obj() if hasattr(shm, "get_obj") else shm
+    grab = grab_main_display_rgb if display_id is None else _grab_display(display_id)
     while not stop.is_set():
-        packed = pack_frame(grab_letterboxed_rgb(width, height), bpp)
+        packed = pack_frame(grab_letterboxed_rgb(width, height, grab=grab), bpp)
         if len(packed) != n:
             continue
         buf[:n] = packed
         counter.value += 1
+
+
+def _grab_display(display_id: int) -> Grabber:
+    return lambda: grab_cg_display_rgb(display_id)
 
 
 def cmd_mirror(fl: FL2000, seconds: float, monitor: int) -> int:
@@ -73,21 +86,57 @@ def cmd_mirror(fl: FL2000, seconds: float, monitor: int) -> int:
     frame = pack_frame(rgb, mode.bpp)
     if bring_up_hdmi(fl, mode) != 0:
         return 1
-    return _pace_clone(fl, frame, mode, monitor, seconds)
+    return _pace_clone(fl, frame, mode, None, seconds)
 
 
-def _pace_clone(fl: FL2000, frame: bytes, mode, monitor: int, seconds: float) -> int:
+def cmd_extend(fl: FL2000, seconds: float) -> int:
+    """Create a WindowServer display and pump it to the Hagibis (not a clone of the Air)."""
+    from PIL import Image
+
+    from fl2000_re.virtual_display import spawn_virtual_display
+
+    mode = default_mirror_mode()
+    fmt = "RGB332" if mode.bpp == 1 else "RGB565"
+    print(f"== tela extra (extend) → HDMI {mode.width}x{mode.height} {fmt} ==")
+    handle = spawn_virtual_display()
+    try:
+        screen = handle.screen
+        print(
+            f"  display virtual id={screen.display_id} "
+            f"{screen.width}x{screen.height} em ({screen.origin_x},{screen.origin_y}). "
+            "Arraste janelas para o monitor 'Hagibis'."
+        )
+        print("  os dois HDMI do Hagibis continuam o mesmo stream.")
+        rgb = grab_letterboxed_rgb(mode.width, mode.height, grab=_grab_display(screen.display_id))
+        Image.frombytes("RGB", (mode.width, mode.height), rgb).save("preview.png")
+        print("  gravou preview.png (o que vai pro HDMI)")
+        frame = pack_frame(rgb, mode.bpp)
+        if bring_up_hdmi(fl, mode) != 0:
+            return 1
+        return _pace_clone(fl, frame, mode, screen.display_id, seconds, label="estendendo")
+    finally:
+        handle.close()
+
+
+def _pace_clone(
+    fl: FL2000,
+    frame: bytes,
+    mode,
+    display_id: int | None,
+    seconds: float,
+    label: str = "espelhando",
+) -> int:
     n = len(frame)
     shm = mp.Array("B", frame, lock=False)
     counter = mp.Value("i", 1)
     stop = mp.Event()
     proc = mp.Process(
         target=hdmi_capture_worker,
-        args=(mode.width, mode.height, mode.bpp, monitor, shm, n, counter, stop),
+        args=(mode.width, mode.height, mode.bpp, display_id, shm, n, counter, stop),
         daemon=True,
     )
     proc.start()
-    print("  espelhando — Ctrl+C para parar. Olhe o HDMI do HAGIBIS.")
+    print(f"  {label} — Ctrl+C para parar. Olhe o HDMI do HAGIBIS.")
     sent = 0
     t0 = time.monotonic()
     end_at = None if seconds <= 0 else t0 + seconds

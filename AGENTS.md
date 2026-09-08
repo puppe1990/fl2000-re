@@ -1,7 +1,8 @@
 # Agent rules — fl2000-re
 
-Userspace probe for the Hagibis FL2000DX (`1d5c:2000`) + IT66121. Not a macOS display driver. One
-FL2000 chip = cloned HDMI, not two independent screens.
+Userspace probe for the Hagibis FL2000DX (`1d5c:2000`) + IT66121. `extend` creates a
+CGVirtualDisplay (private API) so WindowServer has one extra desktop, then pumps that framebuffer to
+the FL2000. One FL2000 chip = cloned HDMI, not two independent screens.
 
 ## Code style
 
@@ -46,8 +47,10 @@ fl2000_re/video_modes.py  timings + USB2 budget
 fl2000_re/letterbox.py    aspect-preserving fit
 fl2000_re/probe.py        dump/detect/edid
 fl2000_re/hdmi.py         mode-set + bulk claim
-fl2000_re/stream.py       bars + paced clone
+fl2000_re/stream.py       bars + paced clone + extend
+fl2000_re/virtual_display.py  spawn CGVirtualDisplay helper
 fl2000_re/cli.py          argparse
+native/hagibis_virtual_display.m  WindowServer extra screen
 tests/test_<module>.py    mirrors the package
 ```
 
@@ -62,8 +65,12 @@ tests/test_<module>.py    mirrors the package
 
 ## Hardware caveats (do not "simplify" these away)
 
-- Default clone is 720x480 RGB565 @ 60 Hz (CEA 480p 16:9). 640x480 4:3 is stretched on the Dell
-  16:9. 720p RGB565 overruns USB 2.0. 800x600 RGB332 never locked.
+- Default clone/extend HDMI is 720x480 RGB565 @ 60 Hz (CEA 480p 16:9). 640x480 4:3 is stretched on
+  the Dell 16:9. 720p RGB565 overruns USB 2.0. 800x600 RGB332 never locked.
+- `extend` virtual desktop is also 720x480 1x (matches HDMI). Do not make it HiDPI — that downscales
+  UI on the Dell again.
+- Both Hagibis HDMIs always show the same FL2000 stream. Native USB-C HDMI is a separate GPU pipe
+  and is unrelated.
 - REG_ACLK bit 28 must stay set (EOF = ZLP) or bulk NAKs forever.
 - Kill the mirror by exact PID. Never `pkill -f hagibis_re.py`.
 - After Access denied / claim fail: unplug the Hagibis USB-A, then `diskutil unmountDisk` the
