@@ -25,6 +25,7 @@ import contextlib
 import sys
 import threading
 import time
+from dataclasses import dataclass
 
 import usb.core
 import usb.util
@@ -343,11 +344,69 @@ def dword_swap_frame(buf: bytes) -> bytes:
     return bytes(out)
 
 
-WIDTH, HEIGHT = 640, 480
+@dataclass(frozen=True)
+class VideoMode:
+    width: int
+    height: int
+    freq: int
+    h_sync_1: int
+    h_sync_2: int
+    v_sync_1: int
+    v_sync_2: int
+    pll: int
+    vic: int
+    pixclk: int
 
 
-def bring_up_hdmi_640(fl: FL2000) -> int:
-    """Program FL2000 + IT66121 for 640x480@60 RGB565 HDMI. Returns 0 on success."""
+def encode_hsync1(hactive: int, htotal: int) -> int:
+    return (hactive << 16) | htotal
+
+
+def encode_vsync1(vactive: int, vtotal: int) -> int:
+    return (vactive << 16) | vtotal
+
+
+MODE_640x480 = VideoMode(
+    width=640,
+    height=480,
+    freq=60,
+    h_sync_1=0x2800320,
+    h_sync_2=0x600091,
+    v_sync_1=0x1E0020D,
+    v_sync_2=0x2420024,
+    pll=0x003F6119,
+    vic=1,
+    pixclk=800 * 525 * 60,
+)
+
+# CEA-861 1280x720@60 + official HDMI v_sync_reg_2 tweak (0x1A5001A).
+MODE_1280x720 = VideoMode(
+    width=1280,
+    height=720,
+    freq=60,
+    h_sync_1=encode_hsync1(1280, 1650),
+    h_sync_2=0x00280105,
+    v_sync_1=encode_vsync1(720, 750),
+    v_sync_2=0x01A5001A,
+    pll=0x0059610C,
+    vic=4,
+    pixclk=1650 * 750 * 60,
+)
+
+
+def default_mirror_mode() -> VideoMode:
+    return MODE_1280x720
+
+
+def resize_rgb888(src: bytes, src_w: int, src_h: int, dst_w: int, dst_h: int) -> bytes:
+    from PIL import Image
+
+    img = Image.frombytes("RGB", (src_w, src_h), src)
+    return img.resize((dst_w, dst_h), Image.Resampling.LANCZOS).tobytes()
+
+
+def bring_up_hdmi(fl: FL2000, mode: VideoMode) -> int:
+    """Program FL2000 + IT66121 for RGB565 HDMI. Returns 0 on success."""
     if cmd_detect(fl) != 0:
         print("  sem IT66121; abortando")
         return 1
@@ -364,11 +423,10 @@ def bring_up_hdmi_640(fl: FL2000) -> int:
     fl.bit_set(REG_USB_LPM, 19)
     fl.bit_set(REG_USB_LPM, 20)
 
-    pll, h1, h2, v1, v2 = 0x003F6119, 0x2800320, 0x600091, 0x1E0020D, 0x2420024
-    fl.reg_write(REG_PLL, pll)
+    fl.reg_write(REG_PLL, mode.pll)
     fl.bit_set(REG_RST, 15)
     time.sleep(0.02)
-    if fl.reg_read(REG_PLL) != pll:
+    if fl.reg_read(REG_PLL) != mode.pll:
         print(f"  PLL readback mismatch: 0x{fl.reg_read(REG_PLL):08X}")
 
     for bit in (22, 24, 19, 21, 13, 27, 28, 29):
@@ -381,17 +439,62 @@ def bring_up_hdmi_640(fl: FL2000) -> int:
     fl.bit_set(REG_PXCLK, 6)
     fl.bit_set(REG_PXCLK, 7)
 
-    for off, val in ((REG_HSYNC1, h1), (REG_HSYNC2, h2), (REG_VSYNC1, v1), (REG_VSYNC2, v2)):
+    for off, val in (
+        (REG_HSYNC1, mode.h_sync_1),
+        (REG_HSYNC2, mode.h_sync_2),
+        (REG_VSYNC1, mode.v_sync_1),
+        (REG_VSYNC2, mode.v_sync_2),
+    ):
         fl.reg_write(off, val)
 
     fl.reg_write(REG_ISOCH, fl.reg_read(REG_ISOCH) & 0xC000FFFF)
     fl.bit_set(REG_USB_LPM, 13)
     fl.bit_clear(REG_CTRL3, 10)
-    print("  FL2000 mode 640x480 RGB565 programado")
+    print(f"  FL2000 mode {mode.width}x{mode.height} RGB565 programado")
 
+    ite_av_mute(ite, 1)
+    ite_send_avi_infoframe(ite, mode)
+    ite_enable_video(ite, mode)
+    ite_av_mute(ite, 0)
+    print("  IT66121 video output ligado")
+
+    usb.util.claim_interface(fl.dev, 0)
+    fl.dev.set_interface_altsetting(0, 1)
+    with contextlib.suppress(usb.core.USBError):
+        fl.dev.clear_halt(BULK_EP)
+    return 0
+
+
+def bring_up_hdmi_640(fl: FL2000) -> int:
+    return bring_up_hdmi(fl, MODE_640x480)
+
+
+def ite_av_mute(ite: IT66121, mute: int) -> None:
     ite.switch_bank(0)
-    ite.write_masked(0xC1, 0x01, 1)
+    ite.write_masked(0xC1, 0x01, mute)
     ite.write_byte(0xC6, 0x03)
+
+
+def ite_send_avi_infoframe(ite: IT66121, mode: VideoMode) -> None:
+    db = [0] * 13
+    db[0] = 1 << 4
+    if mode.vic in (4, 16):
+        db[1] = 8 | (2 << 4) | (2 << 6)
+    else:
+        db[1] = 8 | (1 << 4) | (1 << 6)
+    db[3] = mode.vic
+    checksum = (0x100 - sum(db) - (0x82 + 0x02 + 13)) & 0xFF
+    ite.switch_bank(1)
+    ite.write_dword(0x58, db[0] | (db[1] << 8) | (db[2] << 16) | (db[3] << 24))
+    ite.write_dword(0x5C, db[4] | (checksum << 8) | (db[5] << 16) | (db[6] << 24))
+    ite.write_dword(0x60, db[7] | (db[8] << 8) | (db[9] << 16) | (db[10] << 24))
+    ite.write_dword(0x64, db[11] | (db[12] << 8))
+    ite.switch_bank(0)
+    ite.write_byte(0xCD, 0x03)
+
+
+def ite_enable_video(ite: IT66121, mode: VideoMode) -> None:
+    high = mode.pixclk > 80_000_000
     ite.write_byte(0x04, 0x09)
     cur = ite.read_byte(0x70)
     cur &= ~((3 << 6) | (1 << 4) | (1 << 3) | (1 << 2) | (1 << 5))
@@ -402,21 +505,18 @@ def bring_up_hdmi_640(fl: FL2000) -> int:
     ite.write_byte(0x72, cur)
     ite.write_byte(0xC0, 1)
     ite.write_byte(0x61, 0x10)
-    ite.write_masked(0x62, 0x90, 0x10)
-    ite.write_masked(0x64, 0x89, 0x09)
-    ite.write_masked(0x68, 0x10, 0x10)
+    if high:
+        ite.write_masked(0x62, 0x90, 0x80)
+        ite.write_masked(0x64, 0x89, 0x80)
+        ite.write_masked(0x68, 0x10, 0x80)
+    else:
+        ite.write_masked(0x62, 0x90, 0x10)
+        ite.write_masked(0x64, 0x89, 0x09)
+        ite.write_masked(0x68, 0x10, 0x10)
     ite.write_masked(0x04, 0x28, 0x00)
     ite.write_byte(0x61, 0x00)
     ite.write_byte(0x04, 0x01)
     ite.write_byte(0x61, 0x00)
-    ite.write_masked(0xC1, 0x01, 0)
-    print("  IT66121 video output ligado")
-
-    usb.util.claim_interface(fl.dev, 0)
-    fl.dev.set_interface_altsetting(0, 1)
-    with contextlib.suppress(usb.core.USBError):
-        fl.dev.clear_halt(BULK_EP)
-    return 0
 
 
 def send_frame(fl: FL2000, frame: bytes) -> None:
@@ -431,9 +531,10 @@ def release_bulk(fl: FL2000) -> None:
 
 
 def cmd_bars(fl: FL2000, seconds: float) -> int:
-    print("== test pattern 640x480 RGB565 ==")
-    frame = dword_swap_frame(make_bars(WIDTH, HEIGHT))
-    if bring_up_hdmi_640(fl) != 0:
+    mode = MODE_640x480
+    print(f"== test pattern {mode.width}x{mode.height} RGB565 ==")
+    frame = dword_swap_frame(make_bars(mode.width, mode.height))
+    if bring_up_hdmi(fl, mode) != 0:
         return 1
     print(f"  streaming {len(frame)} bytes/frame por {seconds:.0f}s (olhe o HDMI)")
     sent = 0
@@ -455,15 +556,13 @@ def cmd_bars(fl: FL2000, seconds: float) -> int:
 
 
 def _grab_resized_rgb(sct, mon, width: int, height: int) -> bytes:
-    from PIL import Image
-
     shot = sct.grab(mon)
-    img = Image.frombytes("RGB", (shot.width, shot.height), shot.rgb)
-    return img.resize((width, height), Image.BILINEAR).tobytes()
+    return resize_rgb888(shot.rgb, shot.width, shot.height, width, height)
 
 
 def cmd_mirror(fl: FL2000, seconds: float, monitor: int) -> int:
-    print("== espelho da tela → HDMI 640x480 ==")
+    mode = default_mirror_mode()
+    print(f"== espelho da tela → HDMI {mode.width}x{mode.height} ==")
     import mss
     from PIL import Image
 
@@ -474,8 +573,8 @@ def cmd_mirror(fl: FL2000, seconds: float, monitor: int) -> int:
     mon = sct.monitors[monitor]
     print(f"  capturando monitor {monitor}: {mon}")
 
-    rgb = _grab_resized_rgb(sct, mon, WIDTH, HEIGHT)
-    preview = Image.frombytes("RGB", (WIDTH, HEIGHT), rgb)
+    rgb = _grab_resized_rgb(sct, mon, mode.width, mode.height)
+    preview = Image.frombytes("RGB", (mode.width, mode.height), rgb)
     preview.save("preview.png")
     print("  gravou preview.png (o que vai pro HDMI)")
     if max(rgb[::97]) < 12:
@@ -486,7 +585,7 @@ def cmd_mirror(fl: FL2000, seconds: float, monitor: int) -> int:
         return 1
 
     packed = dword_swap_frame(rgb888_to_rgb565(rgb))
-    if bring_up_hdmi_640(fl) != 0:
+    if bring_up_hdmi(fl, mode) != 0:
         return 1
 
     latest = [packed]
@@ -497,7 +596,7 @@ def cmd_mirror(fl: FL2000, seconds: float, monitor: int) -> int:
     def capturer() -> None:
         while not stop.is_set():
             try:
-                raw = _grab_resized_rgb(sct, mon, WIDTH, HEIGHT)
+                raw = _grab_resized_rgb(sct, mon, mode.width, mode.height)
                 latest[0] = dword_swap_frame(rgb888_to_rgb565(raw))
                 captured[0] += 1
             except Exception as exc:
