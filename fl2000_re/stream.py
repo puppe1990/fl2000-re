@@ -9,9 +9,9 @@ import time
 import usb.core
 import usb.util
 
+from fl2000_re.capture import grab_letterboxed_rgb
 from fl2000_re.fl2000_usb import FL2000
 from fl2000_re.hdmi import bring_up_hdmi
-from fl2000_re.letterbox import fit_rgb888
 from fl2000_re.pixels import dword_swap_frame, make_bars_rgb565, needs_zlp, pack_frame
 from fl2000_re.registers import BULK_EP
 from fl2000_re.video_modes import MODE_640x480, default_mirror_mode
@@ -40,23 +40,14 @@ def cmd_bars(fl: FL2000, seconds: float) -> int:
     return _pump_until(fl, frame, seconds)
 
 
-def grab_letterboxed_rgb(sct, mon, width: int, height: int) -> bytes:
-    shot = sct.grab(mon)
-    return fit_rgb888(shot.rgb, shot.width, shot.height, width, height)
-
-
 def hdmi_capture_worker(
-    width: int, height: int, bpp: int, monitor: int, shm, n: int, counter, stop
+    width: int, height: int, bpp: int, _monitor: int, shm, n: int, counter, stop
 ) -> None:
     """Fill shm with a packed HDMI frame; never touches USB."""
-    import mss
-
-    sct = mss.MSS()
-    mon = sct.monitors[monitor]
     # Array(..., lock=False) has no get_obj() on some Python builds.
     buf = shm.get_obj() if hasattr(shm, "get_obj") else shm
     while not stop.is_set():
-        packed = pack_frame(grab_letterboxed_rgb(sct, mon, width, height), bpp)
+        packed = pack_frame(grab_letterboxed_rgb(width, height), bpp)
         if len(packed) != n:
             continue
         buf[:n] = packed
@@ -67,19 +58,13 @@ def cmd_mirror(fl: FL2000, seconds: float, monitor: int) -> int:
     mode = default_mirror_mode()
     fmt = "RGB332" if mode.bpp == 1 else "RGB565"
     print(f"== espelho da tela → HDMI {mode.width}x{mode.height} {fmt} ==")
-    import mss
     from PIL import Image
 
-    sct = mss.MSS()
-    if monitor < 1 or monitor >= len(sct.monitors):
-        print(f"  monitor {monitor} invalido. disponiveis: {sct.monitors[1:]}")
-        return 1
-    mon = sct.monitors[monitor]
-    print(f"  capturando monitor {monitor}: {mon}")
-    rgb = grab_letterboxed_rgb(sct, mon, mode.width, mode.height)
+    print(f"  capturando display (monitor={monitor})")
+    rgb = grab_letterboxed_rgb(mode.width, mode.height)
     Image.frombytes("RGB", (mode.width, mode.height), rgb).save("preview.png")
     print("  gravou preview.png (o que vai pro HDMI)")
-    if max(rgb[::97]) < 12:
+    if max(rgb) < 12:
         print(
             "  captura preta. Em Ajustes → Privacidade → Gravacao da Tela, "
             "libere o Terminal (ou o Python) e rode de novo."

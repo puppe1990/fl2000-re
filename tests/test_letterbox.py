@@ -38,3 +38,30 @@ def test_resize_rgb888_keeps_solid_color():
     out = resize_rgb888(src, 8, 8, 16, 16)
     assert out[0:3] == bytes([255, 0, 0])
     assert out[-3:] == bytes([255, 0, 0])
+
+
+def test_text_unsharp_leaves_black_black():
+    from fl2000_re.letterbox import sharpen_downscaled_rgb
+
+    out = sharpen_downscaled_rgb(bytes(20 * 20 * 3), 20, 20)
+    assert out[0:3] == bytes([0, 0, 0])
+
+
+def test_text_unsharp_leaves_white_white():
+    from fl2000_re.letterbox import sharpen_downscaled_rgb
+
+    out = sharpen_downscaled_rgb(bytes([255, 255, 255]) * (20 * 20), 20, 20)
+    assert out[0:3] == bytes([255, 255, 255])
+
+
+def test_fit_letterbox_stays_black_after_sharpen():
+    src = bytes([255, 255, 255]) * (20 * 10)
+    out = fit_rgb888(src, 20, 10, 20, 20)
+    assert out[0:3] == bytes([0, 0, 0])
+
+
+def test_fit_center_crops_when_source_covers_double_dest():
+    """1710x1107 covers 1280x960; crop then exact 2x so glyphs stay on pixel grid."""
+    src = bytes([255, 0, 0]) * (5 * 4)
+    out = fit_rgb888(src, 5, 4, 2, 2)
+    assert out[-3:] == bytes([255, 0, 0])
