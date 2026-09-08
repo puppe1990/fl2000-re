@@ -13,6 +13,13 @@ from fl2000_re.letterbox import fit_rgb888
 Grabber = Callable[[], tuple[bytes, int, int]]
 
 
+def mss_hidpi_image_options() -> int:
+    """Drop NominalResolution so CG returns 3420x2214, not the smeared 1710x1107."""
+    import mss.darwin as darwin
+
+    return darwin.kCGWindowImageBoundsIgnoreFraming | darwin.kCGWindowImageShouldBeOpaque
+
+
 def grab_letterboxed_rgb(width: int, height: int, grab: Grabber | None = None) -> bytes:
     grab = grab or grab_main_display_rgb
     rgb, src_w, src_h = grab()
@@ -29,7 +36,9 @@ def grab_main_display_rgb() -> tuple[bytes, int, int]:
 def _try_mss_primary() -> tuple[bytes, int, int] | None:
     try:
         import mss
+        import mss.darwin as darwin
 
+        darwin.IMAGE_OPTIONS = mss_hidpi_image_options()
         sct = mss.MSS()
         mons = sct.monitors
         if len(mons) < 2 or mons[1].get("width", 0) < 64:

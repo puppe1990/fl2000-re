@@ -8,7 +8,9 @@ the Dell's 1080p upscale.
 from PIL import Image, ImageFilter
 
 OVERSAMPLE = 2
-_UNSHARP = ImageFilter.UnsharpMask(radius=1.2, percent=180, threshold=1)
+# Stronger than photo unsharp: TUI glyphs on 640x480 must survive Dell 2.25x.
+_UNSHARP = ImageFilter.UnsharpMask(radius=1.0, percent=280, threshold=0)
+HIDPI_MIN_SCALE = 4
 
 
 def resize_rgb888(src: bytes, src_w: int, src_h: int, dst_w: int, dst_h: int) -> bytes:
@@ -27,6 +29,9 @@ def fit_rgb888(src: bytes, src_w: int, src_h: int, dst_w: int, dst_h: int) -> by
     Never center-crop: a 1280x960 window of the Air 1710x1107 threw the
     Grok TUI off the Dell (IMG_2117).
     """
+    if src_w >= dst_w * HIDPI_MIN_SCALE and src_h >= dst_h * HIDPI_MIN_SCALE:
+        # Retina: one LANCZOS onto dest. Extra 2x BOX only blurs a 5x source.
+        return _letterbox_into(src, src_w, src_h, dst_w, dst_h).filter(_UNSHARP).tobytes()
     hi_w, hi_h = dst_w * OVERSAMPLE, dst_h * OVERSAMPLE
     hi = _letterbox_into(src, src_w, src_h, hi_w, hi_h)
     out = hi.resize((dst_w, dst_h), Image.Resampling.BOX)
