@@ -10,8 +10,8 @@ transmitter — not DisplayLink, and not a native extra macOS display.
 - IT66121 on I2C `0x4C` (vendor `0x4954`, device `0x612`)
 - EDID from the HDMI sink
 - color bars **640×480 @ 60 fps** (RGB565, USB 2.0)
-- **mirror** the Mac screen onto HDMI at **640×480 @ 60 Hz** with aspect-preserving letterbox.
-  Custom 16:9 modes flickered on the Dell; stretching the Air’s 3:2 display misframed it.
+- **mirror** the Mac screen onto HDMI at **800×600 @ 60 Hz** (RGB332, letterboxed). 640×480 RGB565
+  was stable but soft on 1080p; 720p RGB565 overruns USB 2.0 (~110 MB/s vs ~40 MB/s).
 
 Plug **one** HDMI cable into the Hagibis. One FL2000 chip = one output.
 

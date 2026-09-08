@@ -1,11 +1,14 @@
 """Mirror must be 16:9 at 60 Hz and fit USB 2.0, or the Dell smears."""
 
 from hagibis_re import (
+    MODE_640x480,
+    MODE_800x600,
     MODE_1280x720,
     default_mirror_mode,
     encode_hsync1,
     encode_vsync1,
     fits_usb2,
+    pll_pixel_clock,
     resize_rgb888,
 )
 
@@ -24,7 +27,39 @@ def test_default_mirror_is_60hz():
 
 def test_default_mirror_fits_usb2():
     mode = default_mirror_mode()
-    assert fits_usb2(mode.width, mode.height, fps=mode.freq)
+    assert fits_usb2(mode.width, mode.height, fps=mode.freq, bpp=mode.bpp)
+
+
+def test_default_mirror_is_rgb332():
+    assert default_mirror_mode().bpp == 1
+
+
+def test_800x600_rgb332_fits_usb2():
+    assert fits_usb2(800, 600, fps=60, bpp=1)
+
+
+def test_800x600_rgb565_does_not_fit_usb2():
+    assert not fits_usb2(800, 600, fps=60, bpp=2)
+
+
+def test_1024x768_rgb332_does_not_fit_usb2():
+    assert not fits_usb2(1024, 768, fps=60, bpp=1)
+
+
+def test_800x600_hsync1_is_vesa():
+    assert MODE_800x600.h_sync_1 == encode_hsync1(800, 1056)
+
+
+def test_800x600_vsync1_is_vesa():
+    assert MODE_800x600.v_sync_1 == encode_vsync1(600, 628)
+
+
+def test_800x600_pll_is_40mhz():
+    assert pll_pixel_clock(MODE_800x600.pll) == 40_000_000
+
+
+def test_640x480_pll_is_25_2mhz():
+    assert pll_pixel_clock(MODE_640x480.pll) == 25_200_000
 
 
 def test_encode_hsync1_packs_active_and_total():
