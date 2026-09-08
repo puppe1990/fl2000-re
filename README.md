@@ -10,7 +10,7 @@ transmitter — not DisplayLink, and not a native extra macOS display.
 - IT66121 on I2C `0x4C` (vendor `0x4954`, device `0x612`)
 - EDID from the HDMI sink
 - color bars **640×480 @ 60 fps** (RGB565, USB 2.0)
-- **mirror** the Mac screen onto that HDMI (`mirror`)
+- **mirror** the Mac screen onto that HDMI at **1280×720** (`mirror`)
 
 Plug **one** HDMI cable into the Hagibis. One FL2000 chip = one output.
 
