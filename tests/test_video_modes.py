@@ -36,10 +36,28 @@ def test_default_mirror_is_rgb565():
 
 
 def test_default_mirror_is_720x480_16by9():
-    """4:3 640x480 is stretched on the Dell 16:9 and smears TUI glyphs (IMG_2119)."""
+    """Dell 1 first filled 16:9 correctly on CEA 480p (not VGA 4:3)."""
     mode = default_mirror_mode()
+    assert mode is MODE_720x480
     assert (mode.width, mode.height) == (720, 480)
     assert mode.vic == 3
+
+
+def test_default_mirror_is_not_vga_4_by_3():
+    assert default_mirror_mode() is not MODE_640x480
+    assert default_mirror_mode().width / default_mirror_mode().height == 1.5
+
+
+def test_720x480_vsync1_is_cea():
+    assert MODE_720x480.v_sync_1 == encode_vsync1(480, 525)
+
+
+def test_720x480_hsync2_is_cea():
+    assert MODE_720x480.h_sync_2 == 0x003E007B
+
+
+def test_720x480_vsync2_is_cea():
+    assert MODE_720x480.v_sync_2 == 0x02560025
 
 
 def test_800x600_rgb332_fits_usb2():
