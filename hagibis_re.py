@@ -322,6 +322,30 @@ def rgb888_to_rgb565(rgb: bytes) -> bytes:
         return bytes(out)
 
 
+def rgb888_to_rgb332(rgb: bytes) -> bytes:
+    if len(rgb) % 3:
+        raise ValueError("rgb888 length must be a multiple of 3")
+    try:
+        import numpy as np
+
+        a = np.frombuffer(rgb, dtype=np.uint8).reshape(-1, 3)
+        out = (a[:, 0] & 0xE0) | ((a[:, 1] >> 3) & 0x1C) | (a[:, 2] >> 6)
+        return out.astype(np.uint8).tobytes()
+    except ImportError:
+        n = len(rgb) // 3
+        out = bytearray(n)
+        src = memoryview(rgb)
+        for i in range(n):
+            j = i * 3
+            out[i] = (src[j] & 0xE0) | ((src[j + 1] >> 3) & 0x1C) | (src[j + 2] >> 6)
+        return bytes(out)
+
+
+def pack_frame(rgb: bytes, bpp: int) -> bytes:
+    packed = rgb888_to_rgb332(rgb) if bpp == 1 else rgb888_to_rgb565(rgb)
+    return dword_swap_frame(packed)
+
+
 def make_bars(width: int, height: int) -> bytes:
     colors = [0xFFFF, 0xFFE0, 0x07FF, 0x07E0, 0xF81F, 0xF800, 0x001F, 0x0000]
     bar_w = max(1, width // len(colors))
@@ -372,6 +396,7 @@ class VideoMode:
     pll: int
     vic: int
     pixclk: int
+    bpp: int = 2
 
 
 # 640x480 RGB565 @ 60 Hz was measured at a full 60 fps on this dongle (~37 MB/s).
@@ -387,6 +412,19 @@ def fits_usb2(
 ) -> bool:
     """True if RGB frames at fps fit the measured USB 2.0 bulk budget (~32 MB/s)."""
     return width * height * bpp * fps <= budget
+
+
+def pll_pixel_clock(pll: int) -> int:
+    """FL2000 VGA PLL: 10 MHz XTAL * multiplier / (prescaler * divisor)."""
+    divisor = pll & 0xFF
+    prescaler = (pll >> 8) & 0x3
+    multiplier = (pll >> 16) & 0xFF
+    return 10_000_000 * multiplier // (prescaler * divisor)
+
+
+def pxclk_color_bit(bpp: int) -> int:
+    """REG_PXCLK: bit 25 = RGB332, bit 6 = RGB565."""
+    return 25 if bpp == 1 else 6
 
 
 def encode_hsync1(hactive: int, htotal: int) -> int:
@@ -425,6 +463,20 @@ MODE_1280x720 = VideoMode(
     pixclk=1650 * 750 * 60,
 )
 
+MODE_800x600 = VideoMode(
+    width=800,
+    height=600,
+    freq=60,
+    h_sync_1=0x3200420,
+    h_sync_2=0x8000D9,
+    v_sync_1=0x2580274,
+    v_sync_2=0x1C4001C,
+    pll=0x00080102,
+    vic=0,
+    pixclk=1056 * 628 * 60,
+    bpp=1,
+)
+
 # 16:9 square pixels at the same 25.2 MHz / 60 Hz VGA clock the chip already
 # sustains. 1920x1080 is exactly 3x this, so the Dell scales evenly.
 MODE_640x360 = VideoMode(
@@ -442,7 +494,7 @@ MODE_640x360 = VideoMode(
 
 
 def default_mirror_mode() -> VideoMode:
-    return MODE_640x480
+    return MODE_800x600
 
 
 def resize_rgb888(src: bytes, src_w: int, src_h: int, dst_w: int, dst_h: int) -> bytes:
@@ -467,7 +519,7 @@ def fit_rgb888(src: bytes, src_w: int, src_h: int, dst_w: int, dst_h: int) -> by
 
 
 def bring_up_hdmi(fl: FL2000, mode: VideoMode) -> int:
-    """Program FL2000 + IT66121 for RGB565 HDMI. Returns 0 on success."""
+    """Program FL2000 + IT66121 for HDMI. Returns 0 on success."""
     if cmd_detect(fl) != 0:
         print("  sem IT66121; abortando")
         return 1
@@ -497,7 +549,7 @@ def bring_up_hdmi(fl: FL2000, mode: VideoMode) -> int:
     for bit in (28, 6, 31, 24, 25, 26, 27):
         fl.bit_clear(REG_PXCLK, bit)
     fl.bit_set(REG_PXCLK, 0)
-    fl.bit_set(REG_PXCLK, 6)
+    fl.bit_set(REG_PXCLK, pxclk_color_bit(mode.bpp))
     fl.bit_set(REG_PXCLK, 7)
 
     for off, val in (
@@ -511,7 +563,8 @@ def bring_up_hdmi(fl: FL2000, mode: VideoMode) -> int:
     fl.reg_write(REG_ISOCH, fl.reg_read(REG_ISOCH) & 0xC000FFFF)
     fl.bit_set(REG_USB_LPM, 13)
     fl.bit_clear(REG_CTRL3, 10)
-    print(f"  FL2000 mode {mode.width}x{mode.height} RGB565 programado")
+    fmt = "RGB332" if mode.bpp == 1 else "RGB565"
+    print(f"  FL2000 mode {mode.width}x{mode.height} {fmt} programado")
 
     ite_av_mute(ite, 1)
     ite_send_avi_infoframe(ite, mode)
@@ -631,7 +684,9 @@ def _grab_resized_rgb(sct, mon, width: int, height: int) -> bytes:
     return fit_rgb888(shot.rgb, shot.width, shot.height, width, height)
 
 
-def _capture_worker(width: int, height: int, monitor: int, shm, n: int, counter, stop) -> None:
+def _capture_worker(
+    width: int, height: int, bpp: int, monitor: int, shm, n: int, counter, stop
+) -> None:
     """Fill shm with a packed HDMI frame; never touches USB."""
     import mss
 
@@ -639,7 +694,7 @@ def _capture_worker(width: int, height: int, monitor: int, shm, n: int, counter,
     mon = sct.monitors[monitor]
     buf = shm.get_obj() if hasattr(shm, "get_obj") else shm
     while not stop.is_set():
-        packed = dword_swap_frame(rgb888_to_rgb565(_grab_resized_rgb(sct, mon, width, height)))
+        packed = pack_frame(_grab_resized_rgb(sct, mon, width, height), bpp)
         if len(packed) != n:
             continue
         buf[:n] = packed
@@ -648,7 +703,8 @@ def _capture_worker(width: int, height: int, monitor: int, shm, n: int, counter,
 
 def cmd_mirror(fl: FL2000, seconds: float, monitor: int) -> int:
     mode = default_mirror_mode()
-    print(f"== espelho da tela → HDMI {mode.width}x{mode.height} ==")
+    fmt = "RGB332" if mode.bpp == 1 else "RGB565"
+    print(f"== espelho da tela → HDMI {mode.width}x{mode.height} {fmt} ==")
     import mss
     from PIL import Image
 
@@ -670,7 +726,7 @@ def cmd_mirror(fl: FL2000, seconds: float, monitor: int) -> int:
         )
         return 1
 
-    frame = dword_swap_frame(rgb888_to_rgb565(rgb))
+    frame = pack_frame(rgb, mode.bpp)
     if bring_up_hdmi(fl, mode) != 0:
         return 1
 
@@ -680,7 +736,7 @@ def cmd_mirror(fl: FL2000, seconds: float, monitor: int) -> int:
     stop = mp.Event()
     proc = mp.Process(
         target=_capture_worker,
-        args=(mode.width, mode.height, monitor, shm, n, counter, stop),
+        args=(mode.width, mode.height, mode.bpp, monitor, shm, n, counter, stop),
         daemon=True,
     )
     proc.start()
