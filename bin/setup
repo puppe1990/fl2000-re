@@ -8,5 +8,11 @@ if command -v npm >/dev/null; then
   npm ci
 fi
 .venv/bin/pre-commit install
+if [[ "$(uname -s)" == Darwin ]]; then
+  clang -fobjc-arc -O2 \
+    -framework Foundation -framework CoreGraphics \
+    -o native/hagibis_virtual_display native/hagibis_virtual_display.m
+  echo "ok: native/hagibis_virtual_display"
+fi
 echo "ok: .venv/bin/python hagibis_re.py dump"
 echo "ok: make check"

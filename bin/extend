@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+# Extra macOS desktop on the Hagibis. Run in Terminal.app (Screen Recording).
+set -euo pipefail
+cd "$(dirname "$0")/.."
+exec .venv/bin/python hagibis_re.py extend --seconds 0
