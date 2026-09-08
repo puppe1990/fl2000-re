@@ -30,8 +30,8 @@ def test_default_mirror_fits_usb2():
     assert fits_usb2(mode.width, mode.height, fps=mode.freq, bpp=mode.bpp)
 
 
-def test_default_mirror_is_rgb332():
-    assert default_mirror_mode().bpp == 1
+def test_default_mirror_is_rgb565():
+    assert default_mirror_mode().bpp == 2
 
 
 def test_800x600_rgb332_fits_usb2():

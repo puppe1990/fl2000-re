@@ -494,7 +494,8 @@ MODE_640x360 = VideoMode(
 
 
 def default_mirror_mode() -> VideoMode:
-    return MODE_800x600
+    # 800x600 RGB332 clocks at 60 Hz but the Dell never shows a picture.
+    return MODE_640x480
 
 
 def resize_rgb888(src: bytes, src_w: int, src_h: int, dst_w: int, dst_h: int) -> bytes:

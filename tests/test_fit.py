@@ -3,9 +3,9 @@
 from hagibis_re import default_mirror_mode, fit_rgb888, fits_usb2
 
 
-def test_default_mirror_is_800x600_60():
+def test_default_mirror_is_stable_640x480_60():
     mode = default_mirror_mode()
-    assert (mode.width, mode.height, mode.freq) == (800, 600, 60)
+    assert (mode.width, mode.height, mode.freq, mode.bpp) == (640, 480, 60, 2)
     assert fits_usb2(mode.width, mode.height, mode.freq, bpp=mode.bpp)
 
 
