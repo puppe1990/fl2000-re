@@ -426,7 +426,7 @@ MODE_640x360 = VideoMode(
 
 
 def default_mirror_mode() -> VideoMode:
-    return MODE_640x360
+    return MODE_640x480
 
 
 def resize_rgb888(src: bytes, src_w: int, src_h: int, dst_w: int, dst_h: int) -> bytes:
@@ -434,6 +434,20 @@ def resize_rgb888(src: bytes, src_w: int, src_h: int, dst_w: int, dst_h: int) ->
 
     img = Image.frombytes("RGB", (src_w, src_h), src)
     return img.resize((dst_w, dst_h), Image.Resampling.BOX).tobytes()
+
+
+def fit_rgb888(src: bytes, src_w: int, src_h: int, dst_w: int, dst_h: int) -> bytes:
+    """Scale src into dst with black bars, keeping aspect ratio."""
+    from PIL import Image
+
+    src_img = Image.frombytes("RGB", (src_w, src_h), src)
+    scale = min(dst_w / src_w, dst_h / src_h)
+    new_w = max(1, int(src_w * scale))
+    new_h = max(1, int(src_h * scale))
+    fitted = src_img.resize((new_w, new_h), Image.Resampling.BOX)
+    canvas = Image.new("RGB", (dst_w, dst_h), (0, 0, 0))
+    canvas.paste(fitted, ((dst_w - new_w) // 2, (dst_h - new_h) // 2))
+    return canvas.tobytes()
 
 
 def bring_up_hdmi(fl: FL2000, mode: VideoMode) -> int:
@@ -596,7 +610,7 @@ def cmd_bars(fl: FL2000, seconds: float) -> int:
 
 def _grab_resized_rgb(sct, mon, width: int, height: int) -> bytes:
     shot = sct.grab(mon)
-    return resize_rgb888(shot.rgb, shot.width, shot.height, width, height)
+    return fit_rgb888(shot.rgb, shot.width, shot.height, width, height)
 
 
 def cmd_mirror(fl: FL2000, seconds: float, monitor: int) -> int:
