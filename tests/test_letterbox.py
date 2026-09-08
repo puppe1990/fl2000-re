@@ -10,12 +10,14 @@ def test_default_mirror_is_stable_720x480_60():
     assert fits_usb2(mode.width, mode.height, mode.freq, bpp=mode.bpp)
 
 
-def test_three_two_source_fills_16by9_canvas():
-    """Air ~3:2 into 720x480 16:9 should fill the width (Dell 1 full screen)."""
-    src = bytes([255, 0, 0]) * (15 * 10)
-    out = fit_rgb888(src, 15, 10, 18, 12)
-    assert out[0:3] == bytes([255, 0, 0])
-    assert out[-3:] == bytes([255, 0, 0])
+def test_fit_keeps_right_edge_black_against_dell_overscan():
+    """CEA 480p overscan clips the right of Dell 1; content must not touch the edge."""
+    src = bytes([255, 0, 0]) * (18 * 12)
+    out = fit_rgb888(src, 18, 12, 18, 12)
+    assert out[0:3] == bytes([0, 0, 0])
+    assert out[-3:] == bytes([0, 0, 0])
+    mid = (6 * 18 + 9) * 3
+    assert out[mid : mid + 3] == bytes([255, 0, 0])
 
 
 def test_fit_letterboxes_wide_source():

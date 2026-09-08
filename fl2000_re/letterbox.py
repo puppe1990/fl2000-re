@@ -11,6 +11,8 @@ OVERSAMPLE = 2
 # Stronger than photo unsharp: TUI glyphs on 640x480 must survive Dell 2.25x.
 _UNSHARP = ImageFilter.UnsharpMask(radius=1.0, percent=280, threshold=0)
 HIDPI_MIN_SCALE = 4
+# CEA 480p is a TV mode; the Dell overscans and clips the right edge.
+UNDERSCAN = 0.92
 
 
 def resize_rgb888(src: bytes, src_w: int, src_h: int, dst_w: int, dst_h: int) -> bytes:
@@ -40,7 +42,9 @@ def fit_rgb888(src: bytes, src_w: int, src_h: int, dst_w: int, dst_h: int) -> by
 
 def _letterbox_into(src: bytes, src_w: int, src_h: int, dst_w: int, dst_h: int) -> Image.Image:
     src_img = Image.frombytes("RGB", (src_w, src_h), src)
-    scale = min(dst_w / src_w, dst_h / src_h)
+    inner_w = max(1, int(dst_w * UNDERSCAN))
+    inner_h = max(1, int(dst_h * UNDERSCAN))
+    scale = min(inner_w / src_w, inner_h / src_h)
     new_w = max(1, int(src_w * scale))
     new_h = max(1, int(src_h * scale))
     fitted = src_img.resize((new_w, new_h), Image.Resampling.LANCZOS)
