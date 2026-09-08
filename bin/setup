@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+set -euo pipefail
+cd "$(dirname "$0")/.."
+python3 -m venv .venv
+.venv/bin/pip install -U pip
+.venv/bin/pip install -e ".[dev]"
+if command -v npm >/dev/null; then
+  npm ci
+fi
+.venv/bin/pre-commit install
+echo "ok: .venv/bin/python hagibis_re.py dump"
+echo "ok: make check"

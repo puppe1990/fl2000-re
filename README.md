@@ -18,29 +18,24 @@ Plug **one** HDMI cable into the Hagibis. One FL2000 chip = one output.
 ## Run
 
 ```bash
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -e ".[dev]"
-python hagibis_re.py dump
-python hagibis_re.py detect
-python hagibis_re.py edid
-python hagibis_re.py bars --seconds 12
-python hagibis_re.py mirror --seconds 0
+./bin/setup
+.venv/bin/python hagibis_re.py dump
+.venv/bin/python hagibis_re.py detect
+.venv/bin/python hagibis_re.py edid
+.venv/bin/python hagibis_re.py bars --seconds 12
+.venv/bin/python hagibis_re.py mirror --seconds 0
 ```
 
 This pushes raw pixels to the dongle. macOS still will not treat it as a display you can drag
 windows onto.
 
-## Dev: lint, tests, Prettier, pre-commit
+Code lives in `fl2000_re/` (one module per concern). `hagibis_re.py` is the CLI shim. Agent rules:
+`AGENTS.md`.
+
+## Dev: one command
 
 ```bash
-npm ci
-pre-commit install
-pre-commit run --all-files
-pytest -q
-ruff check .
-ruff format --check .
-npm run format:check
+make check
 ```
 
-CI (GitHub Actions) runs Prettier, Ruff, and pytest on every push/PR.
+That is ruff + pytest + Prettier. CI runs the same on every push/PR.
