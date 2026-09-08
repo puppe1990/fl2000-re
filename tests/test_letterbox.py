@@ -4,10 +4,18 @@ from fl2000_re.letterbox import fit_rgb888, resize_rgb888
 from fl2000_re.video_modes import default_mirror_mode, fits_usb2
 
 
-def test_default_mirror_is_stable_640x480_60():
+def test_default_mirror_is_stable_720x480_60():
     mode = default_mirror_mode()
     assert (mode.width, mode.height, mode.freq, mode.bpp) == (720, 480, 60, 2)
     assert fits_usb2(mode.width, mode.height, mode.freq, bpp=mode.bpp)
+
+
+def test_three_two_source_fills_16by9_canvas():
+    """Air ~3:2 into 720x480 16:9 should fill the width (Dell 1 full screen)."""
+    src = bytes([255, 0, 0]) * (15 * 10)
+    out = fit_rgb888(src, 15, 10, 18, 12)
+    assert out[0:3] == bytes([255, 0, 0])
+    assert out[-3:] == bytes([255, 0, 0])
 
 
 def test_fit_letterboxes_wide_source():

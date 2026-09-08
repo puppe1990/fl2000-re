@@ -1,7 +1,8 @@
 """HDMI timings the FL2000 + IT66121 can scan out.
 
-Default clone is 640x480 RGB565 @ 60 Hz: measured 60 fps on USB 2.0 (~37 MB/s).
-800x600 RGB332 also clocks at 60 Hz on the wire but the Dell never locks a picture.
+Default clone is CEA-861 VIC 3 720x480p60 16:9 RGB565 (Dell 1 filled the
+panel correctly). 640x480 4:3 is stretched on that 16:9. 800x600 RGB332
+never locked. 1280x720 RGB565 overruns USB 2.0.
 """
 
 from __future__ import annotations
