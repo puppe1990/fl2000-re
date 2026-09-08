@@ -2,6 +2,7 @@
 
 from fl2000_re.video_modes import (
     MODE_640x480,
+    MODE_720x480,
     MODE_800x600,
     MODE_1280x720,
     default_mirror_mode,
@@ -32,6 +33,13 @@ def test_default_mirror_fits_usb2():
 
 def test_default_mirror_is_rgb565():
     assert default_mirror_mode().bpp == 2
+
+
+def test_default_mirror_is_720x480_16by9():
+    """4:3 640x480 is stretched on the Dell 16:9 and smears TUI glyphs (IMG_2119)."""
+    mode = default_mirror_mode()
+    assert (mode.width, mode.height) == (720, 480)
+    assert mode.vic == 3
 
 
 def test_800x600_rgb332_fits_usb2():
@@ -72,6 +80,18 @@ def test_encode_vsync1_packs_active_and_total():
 
 def test_720p_hdmi_tweak_vsync2():
     assert MODE_1280x720.v_sync_2 == 0x01A5001A
+
+
+def test_720x480_hsync1_is_cea():
+    assert MODE_720x480.h_sync_1 == encode_hsync1(720, 858)
+
+
+def test_720x480_pll_is_27mhz():
+    assert pll_pixel_clock(MODE_720x480.pll) == 27_000_000
+
+
+def test_720x480_rgb565_fits_usb2():
+    assert fits_usb2(720, 480, fps=60, bpp=2)
 
 
 def test_rgb332_uses_pxclk_bit_25():

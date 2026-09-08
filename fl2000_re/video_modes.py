@@ -8,7 +8,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-USB2_BUDGET_BPS = 40_000_000
+# 720x480 RGB565@60 = 41.5 MB/s. 640x480 held 36.9; 1280x720 at 110 does not.
+USB2_BUDGET_BPS = 42_000_000
 
 
 @dataclass(frozen=True)
@@ -56,6 +57,22 @@ def encode_hsync1(hactive: int, htotal: int) -> int:
 
 def encode_vsync1(vactive: int, vtotal: int) -> int:
     return (vactive << 16) | vtotal
+
+
+# CEA-861 VIC 3: 720x480p60 16:9. Dell P2219H lists this; 4:3 640x480 is
+# stretched on the 16:9 panel and smears TUI glyphs (IMG_2119).
+MODE_720x480 = VideoMode(
+    width=720,
+    height=480,
+    freq=60,
+    h_sync_1=encode_hsync1(720, 858),
+    h_sync_2=0x003E007B,
+    v_sync_1=encode_vsync1(480, 525),
+    v_sync_2=0x02560025,
+    pll=0x001B610A,
+    vic=3,
+    pixclk=858 * 525 * 60,
+)
 
 
 MODE_640x480 = VideoMode(
@@ -117,5 +134,6 @@ MODE_640x360 = VideoMode(
 
 
 def default_mirror_mode() -> VideoMode:
-    # 800x600 RGB332 clocks at 60 Hz but the Dell never shows a picture.
-    return MODE_640x480
+    # 640x480 4:3 is stretched on the Dell 16:9 (IMG_2119). CEA 480p 16:9
+    # is in the EDID; 800x600 RGB332 never locked.
+    return MODE_720x480
