@@ -3,5 +3,6 @@
 # 640x480 is the only mode the P2016 over HDMI→VGA locks; 720x480 flickers.
 set -euo pipefail
 cd "$(dirname "$0")/.."
-exec .venv/bin/python hagibis_re.py extend \
-  --seconds 0 --mode 640x480 --underscan 1.0 --stretch-x 1.0 --place left
+exec .venv/bin/python -u hagibis_re.py extend \
+  --seconds 0 --mode 640x480 --underscan 1.0 --stretch-x 1.0 --place left \
+  "$@"

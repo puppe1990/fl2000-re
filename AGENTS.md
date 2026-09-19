@@ -83,3 +83,7 @@ tests/test_<module>.py    mirrors the package
 - Do not walk CoreGraphics CF arrays (display/mode enumeration) through raw `ctypes`:
   `CFArrayGetCount` segfaults Python on a stale pointer (2026-09-19). Use the ObjC helper or
   `system_profiler`. Run diagnostics with `python -u` so a crash still flushes the output.
+- Do not call `CGImageGetWidth` / `CGWindowListCreateImage` from the USB process (`mss.grab` does
+  both). A stale CGImage is SIGSEGV, not a Python exception (2026-09-19, `0x39e37920`). Preview via
+  `screencapture` (subprocess). Live grab stays in the capture child; if that child dies, keep
+  sending the last frame and print `capture_worker_exit_message`.

@@ -81,6 +81,19 @@ def test_fit_rejects_negative_stretch_x():
         fit_rgb888(bytes(3), 1, 1, 4, 4, stretch_x=-1.0)
 
 
+def test_fit_identity_underscan_one_preserves_bytes():
+    """Extend 640x480→640x480 must not LANCZOS/unsharp a 1:1 raster (29ms/frame)."""
+    src = bytes((i * 17) % 256 for i in range(8 * 8 * 3))
+    out = fit_rgb888(src, 8, 8, 8, 8, underscan=1.0, stretch_x=1.0)
+    assert out == src
+
+
+def test_fit_does_not_skip_when_underscan_leaves_border():
+    src = bytes((i * 17) % 256 for i in range(8 * 8 * 3))
+    out = fit_rgb888(src, 8, 8, 8, 8, underscan=0.92, stretch_x=1.0)
+    assert out != src
+
+
 def test_fit_underscan_one_fills_whole_vga_raster():
     """Analog VGA has no overscan; underscan=1.0 must leave no border."""
     src = bytes([255, 255, 255]) * (20 * 20)

@@ -49,6 +49,12 @@ def build_parser() -> argparse.ArgumentParser:
         default="right",
         help="lado da tela virtual do extend",
     )
+    ap.add_argument(
+        "--cursor",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="ponteiro no HDMI (desligue com --no-cursor para mais fps)",
+    )
     ap.add_argument("--out", default=None, help="arquivo .jsonl do monitor-log")
     return ap
 
@@ -68,7 +74,14 @@ def main() -> int:
     if args.cmd == "extend":
         mode = resolve_mode(args.mode)
         return cmd_extend(
-            fl, args.seconds, args.underscan, args.stretch_x, mode, args.v_shift, args.place
+            fl,
+            args.seconds,
+            args.underscan,
+            args.stretch_x,
+            mode,
+            args.v_shift,
+            args.place,
+            args.cursor,
         )
     if args.cmd == "monitor-log":
         from fl2000_re.status_log import cmd_monitor_log

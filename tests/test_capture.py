@@ -73,18 +73,102 @@ def test_grab_region_rgb_uses_screencapture_when_cursor_requested(monkeypatch):
     assert (rgb, width, height) == (b"\x01\x02\x03", 1, 1)
 
 
-def test_grab_cg_display_rgb_uses_display_capture_for_cursor():
+def test_grab_via_screencapture_none_uses_full_screen_cli(monkeypatch):
+    from fl2000_re import capture
+
+    seen: list[str] = []
+    monkeypatch.setattr(
+        capture, "_screencapture_rgb", lambda: seen.append("full") or (b"\x01\x02\x03", 1, 1)
+    )
+    monkeypatch.setattr(
+        capture,
+        "_screencapture_display_rgb",
+        lambda _did: (_ for _ in ()).throw(AssertionError("-D path")),
+    )
+    monkeypatch.setattr(
+        capture,
+        "_try_mss_primary",
+        lambda: (_ for _ in ()).throw(AssertionError("mss primary")),
+    )
+    assert capture.grab_via_screencapture() == (b"\x01\x02\x03", 1, 1)
+    assert seen == ["full"]
+
+
+def test_grab_via_screencapture_never_calls_mss(monkeypatch):
+    """Parent-process preview must not call mss.grab: CGImageGetWidth SIGSEGVs Python."""
+    from fl2000_re import capture
+
+    monkeypatch.setattr(
+        capture,
+        "_try_mss_region",
+        lambda *_a, **_k: (_ for _ in ()).throw(AssertionError("mss in parent")),
+    )
+    monkeypatch.setattr(
+        capture, "_screencapture_display_rgb", lambda display_id: (b"\x01\x02\x03", 1, 1)
+    )
+    assert capture.grab_via_screencapture(18) == (b"\x01\x02\x03", 1, 1)
+
+
+def test_mss_client_returns_cached_instance():
+    from fl2000_re import capture
+
+    sentinel = object()
+    capture._MSS_CLIENT = sentinel
+    try:
+        assert capture._mss_client() is sentinel
+    finally:
+        capture._MSS_CLIENT = None
+
+
+def test_grab_cg_display_rgb_blits_cursor_onto_mss_region():
+    """screencapture -C -R is a no-op on CGVirtualDisplay; blit onto mss instead."""
     from fl2000_re.capture import grab_cg_display_rgb
 
-    seen: list[int] = []
+    seen: dict[str, object] = {}
 
-    def fake_display(display_id: int) -> tuple[bytes, int, int]:
-        seen.append(display_id)
+    def fake_region(left: int, top: int, width: int, height: int) -> tuple[bytes, int, int]:
+        seen["region"] = (left, top, width, height)
         return b"\x01\x02\x03" * 8, 4, 2
 
-    rgb, width, height = grab_cg_display_rgb(18, include_cursor=True, grab_display=fake_display)
-    assert seen == [18]
-    assert (rgb, width, height) == (b"\x01\x02\x03" * 8, 4, 2)
+    def fake_overlay(
+        rgb: bytes,
+        width: int,
+        height: int,
+        origin_x: int,
+        origin_y: int,
+        bounds_w: int,
+        bounds_h: int,
+    ) -> bytes:
+        seen["overlay"] = (width, height, origin_x, origin_y, bounds_w, bounds_h)
+        return b"\x09\x09\x09" * 8
+
+    rgb, width, height = grab_cg_display_rgb(
+        18,
+        include_cursor=True,
+        bounds_of=lambda _d: (-640, 0, 4, 2),
+        grab_bounds=fake_region,
+        overlay_cursor=fake_overlay,
+    )
+    assert seen["region"] == (-640, 0, 4, 2)
+    assert seen["overlay"] == (4, 2, -640, 0, 4, 2)
+    assert (rgb, width, height) == (b"\x09\x09\x09" * 8, 4, 2)
+
+
+def test_grab_cg_display_rgb_skips_overlay_without_cursor():
+    from fl2000_re.capture import grab_cg_display_rgb
+
+    def boom(*_a, **_k):  # noqa: ANN002
+        raise AssertionError("overlay must not run when include_cursor=False")
+
+    rgb, width, height = grab_cg_display_rgb(
+        7,
+        include_cursor=False,
+        bounds_of=lambda _d: (0, 0, 4, 2),
+        grab_bounds=lambda *_a: (b"\x01\x02\x03" * 8, 4, 2),
+        overlay_cursor=boom,
+    )
+    assert (width, height) == (4, 2)
+    assert rgb[:3] == b"\x01\x02\x03"
 
 
 def test_grab_letterboxed_rgb_uses_injected_grabber():

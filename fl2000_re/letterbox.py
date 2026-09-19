@@ -44,6 +44,8 @@ def fit_rgb888(
     fit_rgb888(rgb, 1710, 1107, 640, 480, underscan=1.0, stretch_x=1.2)
     """
     _check_fill(underscan, stretch_x)
+    if _is_identity_fit(src_w, src_h, dst_w, dst_h, underscan, stretch_x):
+        return src
     if src_w >= dst_w * HIDPI_MIN_SCALE and src_h >= dst_h * HIDPI_MIN_SCALE:
         # Retina: one LANCZOS onto dest. Extra 2x BOX only blurs a 5x source.
         canvas = _letterbox_into(src, src_w, src_h, dst_w, dst_h, underscan, stretch_x)
@@ -52,6 +54,13 @@ def fit_rgb888(
     hi = _letterbox_into(src, src_w, src_h, hi_w, hi_h, underscan, stretch_x)
     out = hi.resize((dst_w, dst_h), Image.Resampling.BOX)
     return out.filter(_UNSHARP).tobytes()
+
+
+def _is_identity_fit(
+    src_w: int, src_h: int, dst_w: int, dst_h: int, underscan: float, stretch_x: float
+) -> bool:
+    # Extend 640x480 1:1: LANCZOS 2x + unsharp costs ~29ms and smears the 1x UI.
+    return src_w == dst_w and src_h == dst_h and underscan == 1.0 and stretch_x == 1.0
 
 
 def _check_fill(underscan: float, stretch_x: float) -> None:
