@@ -6,7 +6,41 @@ import time
 
 import fl2000_re.stream as stream
 import pytest
-from fl2000_re.stream import frame_period_s
+from fl2000_re.fl2000_usb import FL2000
+from fl2000_re.registers import BULK_EP
+from fl2000_re.stream import frame_period_s, send_frame
+from fl2000_re.video_modes import MODE_640x480
+
+
+class FakeBulkDevice:
+    """Records every bulk packet so ZLP behaviour is observable."""
+
+    def __init__(self) -> None:
+        self.packets: list[bytes] = []
+
+    def set_configuration(self) -> None:
+        return None
+
+    def write(self, endpoint, data, timeout=None):
+        assert endpoint == BULK_EP
+        self.packets.append(bytes(data))
+        return len(bytes(data))
+
+
+class FakeProcess:
+    """Stands in for the capture worker; _pace_clone only starts/joins it."""
+
+    def __init__(self, **kwargs) -> None:
+        self.exitcode = None
+
+    def start(self) -> None:
+        return None
+
+    def join(self, timeout=None) -> None:
+        return None
+
+    def terminate(self) -> None:
+        return None
 
 
 def test_frame_period_is_one_over_freq():
@@ -57,3 +91,24 @@ def test_hdmi_capture_worker_forwards_fill_params(monkeypatch):
     monkeypatch.setattr(stream, "grab_letterboxed_rgb", fake_grab_letterboxed)
     _run_worker_once(monkeypatch, underscan=1.0, stretch_x=1.1585)
     assert seen == {"underscan": 1.0, "stretch_x": 1.1585}
+
+
+def test_send_frame_adds_zlp_when_max_packet_aligned():
+    fl = FL2000(dev=FakeBulkDevice())
+    send_frame(fl, bytes(512))
+    assert fl.dev.packets == [bytes(512), b""]
+
+
+def test_send_frame_skips_zlp_when_short():
+    fl = FL2000(dev=FakeBulkDevice())
+    send_frame(fl, bytes(100))
+    assert fl.dev.packets == [bytes(100)]
+
+
+def test_pace_clone_streams_paced_without_relying_on_capture(monkeypatch):
+    fl = FL2000(dev=FakeBulkDevice())
+    monkeypatch.setattr(stream.mp, "Process", FakeProcess)
+    monkeypatch.setattr(stream, "release_bulk", lambda _fl: None)
+    assert stream._pace_clone(fl, bytes(512), MODE_640x480, None, 0.1) == 0
+    assert fl.dev.packets
+    assert set(fl.dev.packets) == {bytes(512), b""}
