@@ -89,7 +89,8 @@ def hdmi_capture_worker(
 
 
 def _grab_display(display_id: int) -> Grabber:
-    return lambda: grab_cg_display_rgb(display_id)
+    # include_cursor: the virtual desktop must show the pointer.
+    return lambda: grab_cg_display_rgb(display_id, include_cursor=True)
 
 
 def cmd_mirror(
