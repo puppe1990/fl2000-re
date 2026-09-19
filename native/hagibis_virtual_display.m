@@ -87,6 +87,37 @@ static BOOL wait_online(CGDirectDisplayID display_id) {
     return NO;
 }
 
+// applySettings only advertises the mode; the current mode must be selected
+// explicitly or WindowServer keeps the 640x480 default (DeskPad/Chromium do
+// the same through CGConfigureDisplayWithDisplayMode).
+static BOOL select_mode(CGDirectDisplayID display_id, unsigned width, unsigned height) {
+    CFArrayRef modes = CGDisplayCopyAllDisplayModes(display_id, NULL);
+    if (!modes)
+        return NO;
+    CGDisplayModeRef chosen = NULL;
+    for (CFIndex i = 0; i < CFArrayGetCount(modes); i++) {
+        CGDisplayModeRef m = (CGDisplayModeRef)CFArrayGetValueAtIndex(modes, i);
+        if ((unsigned)CGDisplayModeGetWidth(m) == width &&
+            (unsigned)CGDisplayModeGetHeight(m) == height) {
+            chosen = m;
+            break;
+        }
+    }
+    BOOL ok = NO;
+    if (chosen) {
+        CGDisplayConfigRef cfg = NULL;
+        if (CGBeginDisplayConfiguration(&cfg) == kCGErrorSuccess) {
+            ok = CGConfigureDisplayWithDisplayMode(cfg, display_id, chosen, NULL) ==
+                     kCGErrorSuccess &&
+                 CGCompleteDisplayConfiguration(cfg, kCGConfigureForSession) == kCGErrorSuccess;
+            if (!ok)
+                CGCancelDisplayConfiguration(cfg);
+        }
+    }
+    CFRelease(modes);
+    return ok;
+}
+
 static BOOL arrange_beside_others(CGDirectDisplayID virtual_id, BOOL place_left) {
     CGDirectDisplayID ids[16];
     uint32_t n = 0;
@@ -164,9 +195,15 @@ int main(int argc, char **argv) {
         }
 
         CGVirtualDisplaySettings *settings = [[setCls alloc] init];
-        // 1x: pixels == points == HDMI 720x480. HiDPI would downsample on the Dell.
+        // 1x: pixels == points == HDMI size. HiDPI would downsample on the Dell.
         settings.hiDPI = 0;
-        settings.modes = @[ [[modeCls alloc] initWithWidth:width height:height refreshRate:60] ];
+        settings.modes = @[
+            [[modeCls alloc] initWithWidth:width height:height refreshRate:60],
+            [[modeCls alloc] initWithWidth:640 height:480 refreshRate:60],
+            [[modeCls alloc] initWithWidth:720 height:480 refreshRate:60],
+            [[modeCls alloc] initWithWidth:800 height:600 refreshRate:60],
+            [[modeCls alloc] initWithWidth:1280 height:720 refreshRate:60],
+        ];
         if (![gVirtual applySettings:settings]) {
             fprintf(stderr, "CGVirtualDisplay applySettings failed\n");
             return 1;
@@ -176,6 +213,9 @@ int main(int argc, char **argv) {
         if (!wait_online(display_id)) {
             fprintf(stderr, "virtual display %u did not come online\n", display_id);
             return 1;
+        }
+        if (!select_mode(display_id, width, height)) {
+            fprintf(stderr, "warning: %ux%u mode not accepted; keeping default\n", width, height);
         }
         if (!arrange_beside_others(display_id, place_left)) {
             fprintf(stderr, "warning: could not place virtual display to the %s\n",
