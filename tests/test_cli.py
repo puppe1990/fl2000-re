@@ -45,3 +45,12 @@ def test_cli_v_shift_defaults_to_zero():
 def test_cli_v_shift_accepts_negative():
     ns = build_parser().parse_args(["mirror", "--v-shift", "-8"])
     assert ns.v_shift == -8
+
+
+def test_cli_place_defaults_right():
+    assert build_parser().parse_args(["extend"]).place == "right"
+
+
+def test_cli_place_accepts_left():
+    ns = build_parser().parse_args(["extend", "--place", "left"])
+    assert ns.place == "left"
