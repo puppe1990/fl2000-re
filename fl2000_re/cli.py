@@ -15,7 +15,7 @@ def build_parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(description="Hagibis FL2000 reverse-engineering probe")
     ap.add_argument(
         "cmd",
-        choices=["dump", "detect", "edid", "bars", "mirror", "extend", "all"],
+        choices=["dump", "detect", "edid", "bars", "mirror", "extend", "monitor-log", "all"],
     )
     ap.add_argument("--seconds", type=float, default=8.0, help="0 = ate Ctrl+C (mirror/extend)")
     ap.add_argument("--monitor", type=int, default=1, help="indice mss do display (1=principal)")
@@ -49,6 +49,7 @@ def build_parser() -> argparse.ArgumentParser:
         default="right",
         help="lado da tela virtual do extend",
     )
+    ap.add_argument("--out", default=None, help="arquivo .jsonl do monitor-log")
     return ap
 
 
@@ -69,6 +70,10 @@ def main() -> int:
         return cmd_extend(
             fl, args.seconds, args.underscan, args.stretch_x, mode, args.v_shift, args.place
         )
+    if args.cmd == "monitor-log":
+        from fl2000_re.status_log import cmd_monitor_log
+
+        return cmd_monitor_log(fl, args.seconds, args.out)
     rc = 0
     if args.cmd in ("dump", "all"):
         cmd_dump(fl)

@@ -54,3 +54,9 @@ def test_cli_place_defaults_right():
 def test_cli_place_accepts_left():
     ns = build_parser().parse_args(["extend", "--place", "left"])
     assert ns.place == "left"
+
+
+def test_cli_accepts_monitor_log_with_out():
+    ns = build_parser().parse_args(["monitor-log", "--out", "monitor.jsonl"])
+    assert ns.cmd == "monitor-log"
+    assert ns.out == "monitor.jsonl"

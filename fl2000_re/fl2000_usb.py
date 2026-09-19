@@ -107,22 +107,33 @@ class FL2000:
         return self.i2c_op(addr, offset, read=True)
 
 
+STATUS_BITS = {
+    0: "vga",
+    1: "vga_err",
+    2: "lbuf_halt",
+    6: "pll",
+    7: "dac",
+    8: "lbuf_ovf",
+    9: "lbuf_udf",
+    26: "hdmi_evt",
+    27: "hdmi",
+    28: "edid",
+    29: "monitor",
+    30: "mon_evt",
+    31: "edid_evt",
+}
+
+
+def status_flags(val: int) -> list[str]:
+    """Flag names raised in REG_STATUS (monitor link, line buffer, HDMI events)."""
+    return [name for bit, name in STATUS_BITS.items() if val & (1 << bit)]
+
+
+def status_frame_count(val: int) -> int:
+    """Scanout frame counter carried in REG_STATUS bits 10..25."""
+    return (val >> 10) & 0xFFFF
+
+
 def decode_status(val: int) -> str:
-    bits = {
-        0: "vga",
-        1: "vga_err",
-        2: "lbuf_halt",
-        6: "pll",
-        7: "dac",
-        8: "lbuf_ovf",
-        9: "lbuf_udf",
-        26: "hdmi_evt",
-        27: "hdmi",
-        28: "edid",
-        29: "monitor",
-        30: "mon_evt",
-        31: "edid_evt",
-    }
-    flags = [name for bit, name in bits.items() if val & (1 << bit)]
-    frame = (val >> 10) & 0xFFFF
-    return f"frame_cnt={frame} flags={flags or '-'}"
+    flags = status_flags(val)
+    return f"frame_cnt={status_frame_count(val)} flags={flags or '-'}"
