@@ -143,8 +143,13 @@ def test_resolve_mode_rejects_unknown_name():
         resolve_mode("640x481")
 
 
-def test_shift_vsync2_moves_low_porch_field():
-    assert shift_vsync2(0x02420024, 8) == 0x0242002C
+def test_shift_vsync2_moves_vstart_and_start_latency():
+    """Reference driver keeps start_latency == vstart, so both must move together."""
+    base = MODE_640x480.v_sync_2
+    out = shift_vsync2(base, 8)
+    assert out & 0xFFF == (base & 0xFFF) + 8
+    assert (out >> 20) & 0x3FF == ((base >> 20) & 0x3FF) + 8
+    assert (out >> 16) & 0x7 == (base >> 16) & 0x7
 
 
 def test_shift_vsync2_zero_is_identity():

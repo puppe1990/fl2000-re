@@ -168,14 +168,19 @@ def resolve_mode(name: str) -> VideoMode:
 
 
 def shift_vsync2(v_sync_2: int, lines: int) -> int:
-    """Nudge the scanout vertically via the VSYNC2 porch field.
+    """Nudge the scanout vertically by moving vstart and start_latency together.
 
-    Positive lines push the picture DOWN on an analog sink whose own Vertical
-    Position control is dead (Dell P2016 up button). The porch field is the low
-    16 bits and must stay within 1..65535. Example:
-    shift_vsync2(MODE_640x480.v_sync_2, 8) == 0x0242002C
+    REG_VSYNC2 packs vstart (bits 0..11), vsync_width (16..18) and start_latency
+    (20..29); the reference driver keeps start_latency == vstart. Positive lines
+    push the picture DOWN on an analog sink whose own Vertical Position control
+    is dead (Dell P2016 up button). Example: shift_vsync2(MODE_640x480.v_sync_2, 8)
     """
-    porch = (v_sync_2 & 0xFFFF) + lines
-    if not 1 <= porch <= 0xFFFF:
-        raise ValueError(f"v_shift={lines} yields VSYNC2 porch={porch}, expected 1..65535")
-    return (v_sync_2 & 0xFFFF0000) | porch
+    vstart = (v_sync_2 & 0xFFF) + lines
+    start_latency = ((v_sync_2 >> 20) & 0x3FF) + lines
+    if not 1 <= vstart <= 0xFFF or not 0 <= start_latency <= 0x3FF:
+        raise ValueError(
+            f"v_shift={lines} gives vstart={vstart} start_latency={start_latency}, "
+            "expected vstart 1..4095 and start_latency 0..1023"
+        )
+    out = v_sync_2 & ~0xFFF & ~(0x3FF << 20)
+    return out | vstart | (start_latency << 20)

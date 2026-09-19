@@ -80,3 +80,6 @@ tests/test_<module>.py    mirrors the package
 
 - Timeouts for USB EP0 (2s), bulk (2s), I2C (20 polls).
 - Do not add retries on bulk NAK — tell the user to unplug/replug.
+- Do not walk CoreGraphics CF arrays (display/mode enumeration) through raw `ctypes`:
+  `CFArrayGetCount` segfaults Python on a stale pointer (2026-09-19). Use the ObjC helper or
+  `system_profiler`. Run diagnostics with `python -u` so a crash still flushes the output.
