@@ -369,6 +369,37 @@ def test_cmd_mirror_preview_never_calls_mss(monkeypatch, tmp_path):
     assert (tmp_path / "preview.png").is_file()
 
 
+def test_wall_minus_uptime_gap_is_sleep_duration():
+    from fl2000_re.stream import wall_minus_uptime_gap, woke_from_sleep
+
+    gap = wall_minus_uptime_gap(130.0, 50.2, 100.0, 50.0)
+    assert gap == pytest.approx(29.8)
+    assert woke_from_sleep(gap)
+    assert not woke_from_sleep(0.05)
+
+
+def test_pace_clone_exits_after_sleep_wake(monkeypatch, capsys):
+    """macOS sleep leaves the process alive with a dead HDMI; exit so KeepAlive restarts."""
+    fl = FL2000(dev=FakeBulkDevice())
+    monkeypatch.setattr(stream.mp, "Process", FakeProcess)
+    monkeypatch.setattr(stream, "release_bulk", lambda _fl: None)
+
+    class JumpClocks:
+        def __init__(self) -> None:
+            self.n = 0
+
+        def __call__(self) -> tuple[float, float]:
+            self.n += 1
+            if self.n < 4:
+                return (100.0 + self.n * 0.02, 50.0 + self.n * 0.02)
+            return (100.0 + 40.0, 50.0 + 0.1)
+
+    monkeypatch.setattr(stream, "_read_clocks", JumpClocks())
+    rc = stream._pace_clone(fl, bytes(512), MODE_640x480, None, 0.4)
+    assert rc == 1
+    assert "descanso" in capsys.readouterr().out
+
+
 def test_pace_clone_streams_paced_without_relying_on_capture(monkeypatch):
     fl = FL2000(dev=FakeBulkDevice())
     monkeypatch.setattr(stream.mp, "Process", FakeProcess)

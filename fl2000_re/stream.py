@@ -25,6 +25,36 @@ from fl2000_re.video_modes import MODE_640x480, VideoMode, default_mirror_mode
 
 STATS_INTERVAL_S = 1.0
 TARGET_FPS = 60
+WAKE_GAP_S = 3.0
+
+
+class SystemWakeError(RuntimeError):
+    """macOS slept; FL2000/IT66121 HDMI is gone but this process is still alive."""
+
+
+def wall_minus_uptime_gap(
+    wall_now: float, uptime_now: float, wall_prev: float, uptime_prev: float
+) -> float:
+    """Wall clock minus CLOCK_UPTIME_RAW. Sleep pauses uptime; wall keeps going.
+
+    Example: wall_minus_uptime_gap(130, 50.2, 100, 50) == 29.8
+    """
+    return (wall_now - wall_prev) - (uptime_now - uptime_prev)
+
+
+def woke_from_sleep(gap_s: float, threshold_s: float = WAKE_GAP_S) -> bool:
+    return gap_s >= threshold_s
+
+
+def _uptime_s() -> float:
+    raw = getattr(time, "CLOCK_UPTIME_RAW", None)
+    if raw is None:
+        return time.monotonic()
+    return time.clock_gettime(raw)
+
+
+def _read_clocks() -> tuple[float, float]:
+    return time.time(), _uptime_s()
 
 
 def send_frame(fl: FL2000, frame: bytes) -> None:
@@ -287,14 +317,20 @@ def _pace_clone(
     raw_out = shm.get_obj() if hasattr(shm, "get_obj") else shm
     t0 = time.monotonic()
     sent = 0
+    rc = 1
     try:
         sent = _pump_paced_frames(
             fl, raw_out, mode, seconds, t0, label, counter, grab_ms, cursor, proc
         )
+        rc = 0 if sent else 1
     except KeyboardInterrupt:
-        pass
+        rc = 0 if sent else 1
     except usb.core.USBError as exc:
         print(f"  bulk erro: {exc}")
+        rc = 1
+    except SystemWakeError as exc:
+        print(f"  {exc}", flush=True)
+        rc = 1
     finally:
         stop.set()
         proc.join(timeout=1)
@@ -304,7 +340,7 @@ def _pace_clone(
             f"({sent} frames / {dt:.1f}s)"
         )
         release_bulk(fl)
-    return 0 if sent else 1
+    return rc
 
 
 def _pump_paced_frames(
@@ -327,7 +363,9 @@ def _pump_paced_frames(
     next_tick = t0
     last_log, last_sent, last_cap = t0, 0, counter.value
     warned_dead = False
+    wall0, up0 = _read_clocks()
     while end_at is None or time.monotonic() < end_at:
+        wall0, up0 = _raise_if_woke(wall0, up0)
         warned_dead = _warn_if_capture_dead(proc, warned_dead)
         send_frame(fl, bytes(raw_out))
         sent += 1
@@ -337,6 +375,16 @@ def _pump_paced_frames(
         )
         next_tick = _sleep_until_tick(next_tick, period, now)
     return sent
+
+
+def _raise_if_woke(wall_prev: float, up_prev: float) -> tuple[float, float]:
+    wall, up = _read_clocks()
+    if woke_from_sleep(wall_minus_uptime_gap(wall, up, wall_prev, up_prev)):
+        raise SystemWakeError(
+            "macOS saiu do descanso. O FL2000 perde o HDMI no sleep; "
+            "saindo para o LaunchAgent religar (ou rode ./bin/extend)."
+        )
+    return wall, up
 
 
 def _warn_if_capture_dead(proc, already: bool) -> bool:
