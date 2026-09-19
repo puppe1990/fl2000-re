@@ -31,17 +31,21 @@ from fl2000_re.registers import (
     REG_VSYNC1,
     REG_VSYNC2,
 )
-from fl2000_re.video_modes import MODE_640x480, VideoMode, pxclk_color_bit
+from fl2000_re.video_modes import MODE_640x480, VideoMode, pxclk_color_bit, shift_vsync2
 
 
-def bring_up_hdmi(fl: FL2000, mode: VideoMode) -> int:
-    """Program FL2000 + IT66121 for HDMI. Returns 0 on success."""
+def bring_up_hdmi(fl: FL2000, mode: VideoMode, v_shift: int = 0) -> int:
+    """Program FL2000 + IT66121 for HDMI. Returns 0 on success.
+
+    v_shift nudges the scanout down/up for analog sinks whose own Vertical
+    Position control is unavailable (see video_modes.shift_vsync2).
+    """
     if cmd_detect(fl) != 0:
         print("  sem IT66121; abortando")
         return 1
     ite = IT66121(fl)
     _reset_and_power_ite(fl, ite)
-    _program_fl2000_mode_registers(fl, mode)
+    _program_fl2000_mode_registers(fl, mode, v_shift)
     _enable_ite_video(ite, mode)
     return _claim_bulk_alt1(fl)
 
@@ -59,7 +63,7 @@ def _reset_and_power_ite(fl: FL2000, ite: IT66121) -> None:
     print(f"  HPD={'sim' if hpd else 'NAO'} RxSense={'sim' if rx else 'nao'}")
 
 
-def _program_fl2000_mode_registers(fl: FL2000, mode: VideoMode) -> None:
+def _program_fl2000_mode_registers(fl: FL2000, mode: VideoMode, v_shift: int = 0) -> None:
     fl.bit_clear(REG_USB_CTRL, 17)
     fl.bit_set(REG_USB_LPM, 19)
     fl.bit_set(REG_USB_LPM, 20)
@@ -80,7 +84,7 @@ def _program_fl2000_mode_registers(fl: FL2000, mode: VideoMode) -> None:
         (REG_HSYNC1, mode.h_sync_1),
         (REG_HSYNC2, mode.h_sync_2),
         (REG_VSYNC1, mode.v_sync_1),
-        (REG_VSYNC2, mode.v_sync_2),
+        (REG_VSYNC2, shift_vsync2(mode.v_sync_2, v_shift)),
     ):
         fl.reg_write(off, val)
     fl.reg_write(REG_ISOCH, fl.reg_read(REG_ISOCH) & 0xC000FFFF)

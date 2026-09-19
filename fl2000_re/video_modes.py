@@ -12,6 +12,12 @@ from dataclasses import dataclass
 # 720x480 RGB565@60 = 41.5 MB/s. 640x480 held 36.9; 1280x720 at 110 does not.
 USB2_BUDGET_BPS = 42_000_000
 
+# Dell P2016 (1440x900 16:10) over HDMI→VGA: the analog raster has no overscan
+# and the scaler stretches 4:3 to 16:10. 1.2 would keep true proportions but
+# leaves ~3% side bars (measured); 1.1585 fills the width, ~3.6% wide.
+P2016_VGA_UNDERSCAN = 1.0
+P2016_VGA_STRETCH_X = 1.1585
+
 
 @dataclass(frozen=True)
 class VideoMode:
@@ -138,3 +144,38 @@ def default_mirror_mode() -> VideoMode:
     # 640x480 4:3 is stretched on the Dell 16:9 (IMG_2119). CEA 480p 16:9
     # is in the EDID; 800x600 RGB332 never locked.
     return MODE_720x480
+
+
+NAMED_MODES = {
+    "720x480": MODE_720x480,
+    "640x480": MODE_640x480,
+    "640x360": MODE_640x360,
+    "800x600": MODE_800x600,
+    "1280x720": MODE_1280x720,
+}
+
+
+def resolve_mode(name: str) -> VideoMode:
+    """Map a --mode name to timings (P2016 over VGA wants 640x480).
+
+    Example: resolve_mode("640x480") is MODE_640x480
+    """
+    try:
+        return NAMED_MODES[name]
+    except KeyError:
+        valid = ", ".join(sorted(NAMED_MODES))
+        raise ValueError(f"unknown mode {name!r}, expected one of: {valid}") from None
+
+
+def shift_vsync2(v_sync_2: int, lines: int) -> int:
+    """Nudge the scanout vertically via the VSYNC2 porch field.
+
+    Positive lines push the picture DOWN on an analog sink whose own Vertical
+    Position control is dead (Dell P2016 up button). The porch field is the low
+    16 bits and must stay within 1..65535. Example:
+    shift_vsync2(MODE_640x480.v_sync_2, 8) == 0x0242002C
+    """
+    porch = (v_sync_2 & 0xFFFF) + lines
+    if not 1 <= porch <= 0xFFFF:
+        raise ValueError(f"v_shift={lines} yields VSYNC2 porch={porch}, expected 1..65535")
+    return (v_sync_2 & 0xFFFF0000) | porch

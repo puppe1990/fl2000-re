@@ -17,6 +17,18 @@ def test_grab_letterboxed_rgb_uses_injected_grabber():
     assert out[mid : mid + 3] == bytes([255, 0, 0])
 
 
+def test_grab_letterboxed_rgb_forwards_underscan_and_stretch():
+    """P2016 VGA fill (underscan=1.0, stretch) must reach the fit step."""
+    src = bytes([255, 0, 0]) * (20 * 10)
+
+    def grab() -> tuple[bytes, int, int]:
+        return src, 20, 10
+
+    out = grab_letterboxed_rgb(20, 20, grab=grab, underscan=1.0, stretch_x=2.0)
+    assert len(out) == 20 * 20 * 3
+    assert out[0:3] == bytes([255, 0, 0])
+
+
 def test_mss_hidpi_options_drop_nominal_resolution():
     """NominalResolution forces 1710x1107 and smears TUI glyphs on the Dell."""
     opts = mss_hidpi_image_options()
