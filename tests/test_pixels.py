@@ -79,3 +79,9 @@ def test_pack_frame_rgb332_dword_swaps():
 def test_pack_frame_rgb565_dword_swaps():
     rgb = bytes([255, 0, 0]) * 4
     assert pack_frame(rgb, 2) == dword_swap_frame(rgb888_to_rgb565(rgb))
+
+
+def test_pack_frame_is_byte_identical_across_rebuilds():
+    """Unpaced rewrites of identical bytes still risk mid-scanout tears; rebuilds must match."""
+    rgb = bytes([i % 256 for i in range(3 * 64 * 48)])
+    assert pack_frame(rgb, 2) == pack_frame(rgb, 2)

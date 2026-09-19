@@ -1,5 +1,6 @@
 """Source aspect must be preserved; stretching the Air 3:2 into 16:9 misframes it."""
 
+import pytest
 from fl2000_re.letterbox import fit_rgb888, resize_rgb888
 from fl2000_re.video_modes import default_mirror_mode, fits_usb2
 
@@ -68,6 +69,47 @@ def test_fit_letterbox_stays_black_after_sharpen():
     src = bytes([255, 255, 255]) * (20 * 10)
     out = fit_rgb888(src, 20, 10, 20, 20)
     assert out[0:3] == bytes([0, 0, 0])
+
+
+def test_fit_rejects_zero_underscan():
+    with pytest.raises(ValueError, match="underscan=0"):
+        fit_rgb888(bytes(3), 1, 1, 4, 4, underscan=0)
+
+
+def test_fit_rejects_negative_stretch_x():
+    with pytest.raises(ValueError, match="stretch_x=-1"):
+        fit_rgb888(bytes(3), 1, 1, 4, 4, stretch_x=-1.0)
+
+
+def test_fit_underscan_one_fills_whole_vga_raster():
+    """Analog VGA has no overscan; underscan=1.0 must leave no border."""
+    src = bytes([255, 255, 255]) * (20 * 20)
+    out = fit_rgb888(src, 20, 20, 20, 20, underscan=1.0)
+    assert out[0:3] == bytes([255, 255, 255])
+    assert out[-3:] == bytes([255, 255, 255])
+
+
+def test_fit_stretch_x_presqueezes_for_p2016_scaler():
+    """P2016 stretches the 4:3 raster to 16:10; squeezed content looks right post-stretch."""
+    src = bytes([255, 0, 0]) * (20 * 10)
+    out = fit_rgb888(src, 20, 10, 20, 20, stretch_x=2.0)
+    assert out[0:3] == bytes([0, 0, 0])
+    assert out[-3:] == bytes([0, 0, 0])
+    top = (1 * 20 + 10) * 3
+    assert out[top : top + 3] == bytes([255, 0, 0])
+    mid = (10 * 20 + 10) * 3
+    assert out[mid : mid + 3] == bytes([255, 0, 0])
+
+
+def test_p2016_profile_fills_raster_width():
+    """Winner from the white-screen A/B: no black columns left or right."""
+    from fl2000_re.video_modes import P2016_VGA_STRETCH_X, P2016_VGA_UNDERSCAN
+
+    src = bytes([255, 255, 255]) * (1710 * 1107)
+    out = fit_rgb888(src, 1710, 1107, 64, 48, P2016_VGA_UNDERSCAN, P2016_VGA_STRETCH_X)
+    for x in (0, 63):
+        column = [out[(y * 64 + x) * 3] for y in range(48)]
+        assert max(column) > 0
 
 
 def test_fit_keeps_left_edge_when_source_is_wider_than_2x_dest():

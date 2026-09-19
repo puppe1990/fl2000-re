@@ -25,27 +25,57 @@ def sharpen_downscaled_rgb(rgb: bytes, width: int, height: int) -> bytes:
     return img.filter(_UNSHARP).tobytes()
 
 
-def fit_rgb888(src: bytes, src_w: int, src_h: int, dst_w: int, dst_h: int) -> bytes:
+def fit_rgb888(
+    src: bytes,
+    src_w: int,
+    src_h: int,
+    dst_w: int,
+    dst_h: int,
+    underscan: float = UNDERSCAN,
+    stretch_x: float = 1.0,
+) -> bytes:
     """Scale src into dst with black bars, keeping aspect ratio.
 
     Never center-crop: a 1280x960 window of the Air 1710x1107 threw the
     Grok TUI off the Dell (IMG_2117).
+
+    stretch_x pre-squeezes content for sinks that stretch the raster (Dell
+    P2016 over HDMI→VGA widens 4:3 to 16:10). Example:
+    fit_rgb888(rgb, 1710, 1107, 640, 480, underscan=1.0, stretch_x=1.2)
     """
+    _check_fill(underscan, stretch_x)
     if src_w >= dst_w * HIDPI_MIN_SCALE and src_h >= dst_h * HIDPI_MIN_SCALE:
         # Retina: one LANCZOS onto dest. Extra 2x BOX only blurs a 5x source.
-        return _letterbox_into(src, src_w, src_h, dst_w, dst_h).filter(_UNSHARP).tobytes()
+        canvas = _letterbox_into(src, src_w, src_h, dst_w, dst_h, underscan, stretch_x)
+        return canvas.filter(_UNSHARP).tobytes()
     hi_w, hi_h = dst_w * OVERSAMPLE, dst_h * OVERSAMPLE
-    hi = _letterbox_into(src, src_w, src_h, hi_w, hi_h)
+    hi = _letterbox_into(src, src_w, src_h, hi_w, hi_h, underscan, stretch_x)
     out = hi.resize((dst_w, dst_h), Image.Resampling.BOX)
     return out.filter(_UNSHARP).tobytes()
 
 
-def _letterbox_into(src: bytes, src_w: int, src_h: int, dst_w: int, dst_h: int) -> Image.Image:
+def _check_fill(underscan: float, stretch_x: float) -> None:
+    if not 0 < underscan <= 1:
+        raise ValueError(f"underscan must be within (0, 1], got underscan={underscan!r}")
+    if stretch_x <= 0:
+        raise ValueError(f"stretch_x must be positive, got stretch_x={stretch_x!r}")
+
+
+def _letterbox_into(
+    src: bytes,
+    src_w: int,
+    src_h: int,
+    dst_w: int,
+    dst_h: int,
+    underscan: float,
+    stretch_x: float,
+) -> Image.Image:
     src_img = Image.frombytes("RGB", (src_w, src_h), src)
-    inner_w = max(1, int(dst_w * UNDERSCAN))
-    inner_h = max(1, int(dst_h * UNDERSCAN))
-    scale = min(inner_w / src_w, inner_h / src_h)
-    new_w = max(1, int(src_w * scale))
+    inner_w = max(1, int(dst_w * underscan))
+    inner_h = max(1, int(dst_h * underscan))
+    # Pre-squeeze: a sink stretching the raster by stretch_x shows new_w * stretch_x.
+    scale = min(inner_w * stretch_x / src_w, inner_h / src_h)
+    new_w = max(1, int(src_w * scale / stretch_x))
     new_h = max(1, int(src_h * scale))
     fitted = src_img.resize((new_w, new_h), Image.Resampling.LANCZOS)
     canvas = Image.new("RGB", (dst_w, dst_h), (0, 0, 0))

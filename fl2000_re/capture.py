@@ -8,7 +8,7 @@ import tempfile
 from collections.abc import Callable
 from pathlib import Path
 
-from fl2000_re.letterbox import fit_rgb888
+from fl2000_re.letterbox import UNDERSCAN, fit_rgb888
 
 Grabber = Callable[[], tuple[bytes, int, int]]
 BoundsOf = Callable[[int], tuple[int, int, int, int]]
@@ -22,10 +22,17 @@ def mss_hidpi_image_options() -> int:
     return darwin.kCGWindowImageBoundsIgnoreFraming | darwin.kCGWindowImageShouldBeOpaque
 
 
-def grab_letterboxed_rgb(width: int, height: int, grab: Grabber | None = None) -> bytes:
+def grab_letterboxed_rgb(
+    width: int,
+    height: int,
+    grab: Grabber | None = None,
+    underscan: float = UNDERSCAN,
+    stretch_x: float = 1.0,
+) -> bytes:
+    """Fit the grabbed screen into width x height (see letterbox.fit_rgb888)."""
     grab = grab or grab_main_display_rgb
     rgb, src_w, src_h = grab()
-    return fit_rgb888(rgb, src_w, src_h, width, height)
+    return fit_rgb888(rgb, src_w, src_h, width, height, underscan, stretch_x)
 
 
 def grab_main_display_rgb() -> tuple[bytes, int, int]:

@@ -1,6 +1,10 @@
 """Mirror must fit USB 2.0 at 60 Hz or the Dell smears."""
 
+import pytest
 from fl2000_re.video_modes import (
+    P2016_VGA_STRETCH_X,
+    P2016_VGA_UNDERSCAN,
+    MODE_640x360,
     MODE_640x480,
     MODE_720x480,
     MODE_800x600,
@@ -11,6 +15,8 @@ from fl2000_re.video_modes import (
     fits_usb2,
     pll_pixel_clock,
     pxclk_color_bit,
+    resolve_mode,
+    shift_vsync2,
 )
 
 
@@ -118,3 +124,33 @@ def test_rgb332_uses_pxclk_bit_25():
 
 def test_rgb565_uses_pxclk_bit_6():
     assert pxclk_color_bit(2) == 6
+
+
+def test_p2016_vga_sink_profile():
+    """P2016 over HDMI→VGA: no overscan, pre-squeeze to fill the 4:3 raster."""
+    assert P2016_VGA_UNDERSCAN == 1.0
+    assert pytest.approx(1.1585) == P2016_VGA_STRETCH_X
+
+
+def test_resolve_mode_maps_names_to_timings():
+    assert resolve_mode("640x480") is MODE_640x480
+    assert resolve_mode("640x360") is MODE_640x360
+    assert resolve_mode("720x480") is MODE_720x480
+
+
+def test_resolve_mode_rejects_unknown_name():
+    with pytest.raises(ValueError, match="640x481"):
+        resolve_mode("640x481")
+
+
+def test_shift_vsync2_moves_low_porch_field():
+    assert shift_vsync2(0x02420024, 8) == 0x0242002C
+
+
+def test_shift_vsync2_zero_is_identity():
+    assert shift_vsync2(0x02420024, 0) == 0x02420024
+
+
+def test_shift_vsync2_rejects_underflow():
+    with pytest.raises(ValueError, match="v_shift=-40"):
+        shift_vsync2(0x02420024, -40)

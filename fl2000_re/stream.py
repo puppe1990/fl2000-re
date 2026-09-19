@@ -17,17 +17,30 @@ from fl2000_re.capture import (
 )
 from fl2000_re.fl2000_usb import FL2000
 from fl2000_re.hdmi import bring_up_hdmi
+from fl2000_re.letterbox import UNDERSCAN
 from fl2000_re.pixels import dword_swap_frame, make_bars_rgb565, needs_zlp, pack_frame
 from fl2000_re.registers import BULK_EP
-from fl2000_re.video_modes import MODE_640x480, default_mirror_mode
+from fl2000_re.video_modes import MODE_640x480, VideoMode, default_mirror_mode
 
 
 def send_frame(fl: FL2000, frame: bytes) -> None:
+    # Full-frame bulk rewrite outlasts one scanout, so a changed frame tears
+    # once mid-screen: expected on this single-buffered chip, not a bug.
     fl.dev.write(BULK_EP, frame, timeout=2000)
     if not needs_zlp(len(frame)):
         return
     with contextlib.suppress(usb.core.USBError):
         fl.dev.write(BULK_EP, b"", timeout=50)
+
+
+def frame_period_s(freq: int) -> float:
+    """Bulk cadence for one FL2000 scanout (unpaced rewrites tear mid-scanout).
+
+    Example: frame_period_s(60) == pytest.approx(1 / 60)
+    """
+    if freq <= 0:
+        raise ValueError(f"frame rate must be positive, got freq={freq!r}")
+    return 1.0 / freq
 
 
 def release_bulk(fl: FL2000) -> None:
@@ -46,7 +59,16 @@ def cmd_bars(fl: FL2000, seconds: float) -> int:
 
 
 def hdmi_capture_worker(
-    width: int, height: int, bpp: int, display_id: int | None, shm, n: int, counter, stop
+    width: int,
+    height: int,
+    bpp: int,
+    display_id: int | None,
+    shm,
+    n: int,
+    counter,
+    stop,
+    underscan: float,
+    stretch_x: float,
 ) -> None:
     """Fill shm with a packed HDMI frame; never touches USB.
 
@@ -56,7 +78,10 @@ def hdmi_capture_worker(
     buf = shm.get_obj() if hasattr(shm, "get_obj") else shm
     grab = grab_main_display_rgb if display_id is None else _grab_display(display_id)
     while not stop.is_set():
-        packed = pack_frame(grab_letterboxed_rgb(width, height, grab=grab), bpp)
+        rgb = grab_letterboxed_rgb(
+            width, height, grab=grab, underscan=underscan, stretch_x=stretch_x
+        )
+        packed = pack_frame(rgb, bpp)
         if len(packed) != n:
             continue
         buf[:n] = packed
@@ -67,14 +92,22 @@ def _grab_display(display_id: int) -> Grabber:
     return lambda: grab_cg_display_rgb(display_id)
 
 
-def cmd_mirror(fl: FL2000, seconds: float, monitor: int) -> int:
-    mode = default_mirror_mode()
+def cmd_mirror(
+    fl: FL2000,
+    seconds: float,
+    monitor: int,
+    underscan: float = UNDERSCAN,
+    stretch_x: float = 1.0,
+    mode: VideoMode | None = None,
+    v_shift: int = 0,
+) -> int:
+    mode = default_mirror_mode() if mode is None else mode
     fmt = "RGB332" if mode.bpp == 1 else "RGB565"
     print(f"== espelho da tela → HDMI {mode.width}x{mode.height} {fmt} ==")
     from PIL import Image
 
     print(f"  capturando display (monitor={monitor})")
-    rgb = grab_letterboxed_rgb(mode.width, mode.height)
+    rgb = grab_letterboxed_rgb(mode.width, mode.height, underscan=underscan, stretch_x=stretch_x)
     Image.frombytes("RGB", (mode.width, mode.height), rgb).save("preview.png")
     print("  gravou preview.png (o que vai pro HDMI)")
     if max(rgb) < 12:
@@ -84,21 +117,28 @@ def cmd_mirror(fl: FL2000, seconds: float, monitor: int) -> int:
         )
         return 1
     frame = pack_frame(rgb, mode.bpp)
-    if bring_up_hdmi(fl, mode) != 0:
+    if bring_up_hdmi(fl, mode, v_shift) != 0:
         return 1
-    return _pace_clone(fl, frame, mode, None, seconds)
+    return _pace_clone(fl, frame, mode, None, seconds, underscan=underscan, stretch_x=stretch_x)
 
 
-def cmd_extend(fl: FL2000, seconds: float) -> int:
+def cmd_extend(
+    fl: FL2000,
+    seconds: float,
+    underscan: float = UNDERSCAN,
+    stretch_x: float = 1.0,
+    mode: VideoMode | None = None,
+    v_shift: int = 0,
+) -> int:
     """Create a WindowServer display and pump it to the Hagibis (not a clone of the Air)."""
     from PIL import Image
 
     from fl2000_re.virtual_display import spawn_virtual_display
 
-    mode = default_mirror_mode()
+    mode = default_mirror_mode() if mode is None else mode
     fmt = "RGB332" if mode.bpp == 1 else "RGB565"
     print(f"== tela extra (extend) → HDMI {mode.width}x{mode.height} {fmt} ==")
-    handle = spawn_virtual_display()
+    handle = spawn_virtual_display(width=mode.width, height=mode.height)
     try:
         screen = handle.screen
         print(
@@ -107,13 +147,28 @@ def cmd_extend(fl: FL2000, seconds: float) -> int:
             "Arraste janelas para o monitor 'Hagibis'."
         )
         print("  os dois HDMI do Hagibis continuam o mesmo stream.")
-        rgb = grab_letterboxed_rgb(mode.width, mode.height, grab=_grab_display(screen.display_id))
+        rgb = grab_letterboxed_rgb(
+            mode.width,
+            mode.height,
+            grab=_grab_display(screen.display_id),
+            underscan=underscan,
+            stretch_x=stretch_x,
+        )
         Image.frombytes("RGB", (mode.width, mode.height), rgb).save("preview.png")
         print("  gravou preview.png (o que vai pro HDMI)")
         frame = pack_frame(rgb, mode.bpp)
-        if bring_up_hdmi(fl, mode) != 0:
+        if bring_up_hdmi(fl, mode, v_shift) != 0:
             return 1
-        return _pace_clone(fl, frame, mode, screen.display_id, seconds, label="estendendo")
+        return _pace_clone(
+            fl,
+            frame,
+            mode,
+            screen.display_id,
+            seconds,
+            label="estendendo",
+            underscan=underscan,
+            stretch_x=stretch_x,
+        )
     finally:
         handle.close()
 
@@ -125,6 +180,8 @@ def _pace_clone(
     display_id: int | None,
     seconds: float,
     label: str = "espelhando",
+    underscan: float = UNDERSCAN,
+    stretch_x: float = 1.0,
 ) -> int:
     n = len(frame)
     shm = mp.Array("B", frame, lock=False)
@@ -132,7 +189,18 @@ def _pace_clone(
     stop = mp.Event()
     proc = mp.Process(
         target=hdmi_capture_worker,
-        args=(mode.width, mode.height, mode.bpp, display_id, shm, n, counter, stop),
+        args=(
+            mode.width,
+            mode.height,
+            mode.bpp,
+            display_id,
+            shm,
+            n,
+            counter,
+            stop,
+            underscan,
+            stretch_x,
+        ),
         daemon=True,
     )
     proc.start()
@@ -140,10 +208,12 @@ def _pace_clone(
     sent = 0
     t0 = time.monotonic()
     end_at = None if seconds <= 0 else t0 + seconds
-    period = 1.0 / mode.freq
+    period = frame_period_s(mode.freq)
     next_tick = t0
     raw_out = shm.get_obj() if hasattr(shm, "get_obj") else shm
     try:
+        # Continuous stream: bulk idle starves the line buffer and the sink
+        # blanks/resyncs (screen off/on). Never skip ticks, even unchanged.
         while end_at is None or time.monotonic() < end_at:
             send_frame(fl, bytes(raw_out))
             sent += 1
