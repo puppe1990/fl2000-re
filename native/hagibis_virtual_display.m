@@ -196,14 +196,10 @@ int main(int argc, char **argv) {
 
         CGVirtualDisplaySettings *settings = [[setCls alloc] init];
         // 1x: pixels == points == HDMI size. HiDPI would downsample on the Dell.
+        // A single mode: listing several makes WindowServer pick the largest and
+        // ignore the requested one.
         settings.hiDPI = 0;
-        settings.modes = @[
-            [[modeCls alloc] initWithWidth:width height:height refreshRate:60],
-            [[modeCls alloc] initWithWidth:640 height:480 refreshRate:60],
-            [[modeCls alloc] initWithWidth:720 height:480 refreshRate:60],
-            [[modeCls alloc] initWithWidth:800 height:600 refreshRate:60],
-            [[modeCls alloc] initWithWidth:1280 height:720 refreshRate:60],
-        ];
+        settings.modes = @[ [[modeCls alloc] initWithWidth:width height:height refreshRate:60] ];
         if (![gVirtual applySettings:settings]) {
             fprintf(stderr, "CGVirtualDisplay applySettings failed\n");
             return 1;

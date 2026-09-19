@@ -6,6 +6,7 @@ from __future__ import annotations
 import subprocess
 import tempfile
 from collections.abc import Callable
+from functools import partial
 from pathlib import Path
 
 from fl2000_re.letterbox import UNDERSCAN, fit_rgb888
@@ -46,10 +47,16 @@ def grab_cg_display_rgb(
     display_id: int,
     bounds_of: BoundsOf | None = None,
     grab_bounds: RegionGrabber | None = None,
+    include_cursor: bool = False,
 ) -> tuple[bytes, int, int]:
-    """Capture one CGDirectDisplayID (the virtual Hagibis desktop, not the Air)."""
+    """Capture one CGDirectDisplayID (the virtual Hagibis desktop, not the Air).
+
+    include_cursor forces the screencapture path (-C) so the pointer shows up on
+    the virtual desktop; CGWindowListCreateImage never draws it.
+    """
     bounds_of = bounds_of or cg_display_bounds
-    grab_bounds = grab_bounds or grab_region_rgb
+    if grab_bounds is None:
+        grab_bounds = partial(grab_region_rgb, include_cursor=include_cursor)
     left, top, width, height = bounds_of(display_id)
     if width < 1 or height < 1:
         raise ValueError(
@@ -77,11 +84,24 @@ def cg_display_bounds(display_id: int) -> tuple[int, int, int, int]:
     )
 
 
-def grab_region_rgb(left: int, top: int, width: int, height: int) -> tuple[bytes, int, int]:
-    grabbed = _try_mss_region(left, top, width, height)
-    if grabbed is not None:
-        return grabbed
-    return _screencapture_rect_rgb(left, top, width, height)
+def grab_region_rgb(
+    left: int, top: int, width: int, height: int, include_cursor: bool = False
+) -> tuple[bytes, int, int]:
+    if not include_cursor:
+        grabbed = _try_mss_region(left, top, width, height)
+        if grabbed is not None:
+            return grabbed
+    return _screencapture_rect_rgb(left, top, width, height, include_cursor)
+
+
+def screencapture_rect_args(
+    left: int, top: int, width: int, height: int, include_cursor: bool = False
+) -> list[str]:
+    """screencapture flags for a rect; -C draws the mouse pointer into the shot."""
+    args = ["-R", f"{left},{top},{width},{height}"]
+    if include_cursor:
+        args.append("-C")
+    return args
 
 
 def _try_mss_primary() -> tuple[bytes, int, int] | None:
@@ -119,8 +139,10 @@ def _screencapture_rgb() -> tuple[bytes, int, int]:
     return _screencapture_to_rgb([])
 
 
-def _screencapture_rect_rgb(left: int, top: int, width: int, height: int) -> tuple[bytes, int, int]:
-    return _screencapture_to_rgb(["-R", f"{left},{top},{width},{height}"])
+def _screencapture_rect_rgb(
+    left: int, top: int, width: int, height: int, include_cursor: bool = False
+) -> tuple[bytes, int, int]:
+    return _screencapture_to_rgb(screencapture_rect_args(left, top, width, height, include_cursor))
 
 
 def _screencapture_to_rgb(extra: list[str]) -> tuple[bytes, int, int]:

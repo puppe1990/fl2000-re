@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # Run this in Terminal.app (Screen Recording permission). The agent shell
 # often gets a black framebuffer from CGWindowListCreateImage.
+# 640x480 is the only stable P2016 mode; stretch 1.1585 fills the 4:3 raster.
 set -euo pipefail
 cd "$(dirname "$0")/.."
-exec .venv/bin/python hagibis_re.py mirror --seconds 0 --monitor 1
+exec .venv/bin/python hagibis_re.py mirror \
+  --seconds 0 --monitor 1 --mode 640x480 --underscan 1.0 --stretch-x 1.1585

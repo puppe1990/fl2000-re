@@ -1,7 +1,56 @@
 """Screen grab is injected; unit tests never call mss or screencapture."""
 
 import mss.darwin as darwin
-from fl2000_re.capture import grab_letterboxed_rgb, mss_hidpi_image_options
+from fl2000_re.capture import (
+    grab_letterboxed_rgb,
+    mss_hidpi_image_options,
+    screencapture_rect_args,
+)
+
+
+def test_screencapture_rect_args_include_cursor_flag():
+    """The virtual desktop must show the pointer or the user cannot aim."""
+    args = screencapture_rect_args(10, 20, 30, 40, include_cursor=True)
+    assert "-C" in args
+    assert "-R" in args
+    assert "10,20,30,40" in args
+
+
+def test_screencapture_rect_args_omit_cursor_by_default():
+    assert "-C" not in screencapture_rect_args(10, 20, 30, 40)
+
+
+def test_grab_region_rgb_uses_screencapture_when_cursor_requested(monkeypatch):
+    from fl2000_re import capture
+
+    calls: list[tuple[int, int, int, int, bool]] = []
+
+    def fake_rect(left: int, top: int, width: int, height: int, include_cursor: bool = False):
+        calls.append((left, top, width, height, include_cursor))
+        return b"\x01\x02\x03", 1, 1
+
+    monkeypatch.setattr(
+        capture, "_try_mss_region", lambda *a: (_ for _ in ()).throw(AssertionError)
+    )
+    monkeypatch.setattr(capture, "_screencapture_rect_rgb", fake_rect)
+    rgb, width, height = capture.grab_region_rgb(1, 2, 3, 4, include_cursor=True)
+    assert calls == [(1, 2, 3, 4, True)]
+    assert (rgb, width, height) == (b"\x01\x02\x03", 1, 1)
+
+
+def test_grab_cg_display_rgb_forwards_include_cursor(monkeypatch):
+    from fl2000_re import capture
+
+    seen: list[bool] = []
+
+    def fake_region(left, top, width, height, include_cursor=False):  # noqa: ANN001
+        seen.append(include_cursor)
+        return b"\x01\x02\x03" * (width * height), width, height
+
+    monkeypatch.setattr(capture, "grab_region_rgb", fake_region)
+    monkeypatch.setattr(capture, "cg_display_bounds", lambda _d: (0, 0, 4, 2))
+    capture.grab_cg_display_rgb(7, include_cursor=True)
+    assert seen == [True]
 
 
 def test_grab_letterboxed_rgb_uses_injected_grabber():
