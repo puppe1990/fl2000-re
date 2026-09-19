@@ -108,3 +108,29 @@ def test_spawn_includes_helper_stderr_when_process_dies(tmp_path: Path):
 
     with pytest.raises(RuntimeError, match="CGVirtualDisplay API unavailable"):
         spawn_virtual_display(binary=binary, popen=popen, read_ready=read_ready)
+
+
+def test_spawn_forwards_place_to_helper(tmp_path: Path):
+    binary = tmp_path / "hagibis_virtual_display"
+    binary.write_text("#!/bin/sh\n")
+    binary.chmod(0o755)
+    proc = _FakeProc("HAGIBIS_VIRTUAL display_id=9 width=720 height=480 origin_x=-720 origin_y=0\n")
+    captured: list[str] = []
+
+    def popen(argv, **_kwargs):
+        captured.extend(argv)
+        return proc
+
+    def read_ready(_got, _timeout: float) -> str:
+        return proc._line
+
+    spawn_virtual_display(binary=binary, popen=popen, read_ready=read_ready, place="left")
+    assert captured[-2:] == ["--place", "left"]
+
+
+def test_spawn_rejects_unknown_place(tmp_path: Path):
+    binary = tmp_path / "hagibis_virtual_display"
+    binary.write_text("#!/bin/sh\n")
+    binary.chmod(0o755)
+    with pytest.raises(ValueError, match="place='up'"):
+        spawn_virtual_display(binary=binary, place="up")

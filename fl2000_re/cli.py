@@ -43,6 +43,12 @@ def build_parser() -> argparse.ArgumentParser:
         default=0,
         help="desloca a imagem verticalmente em linhas (negativo = cima)",
     )
+    ap.add_argument(
+        "--place",
+        choices=["left", "right"],
+        default="right",
+        help="lado da tela virtual do extend",
+    )
     return ap
 
 
@@ -60,7 +66,9 @@ def main() -> int:
         )
     if args.cmd == "extend":
         mode = resolve_mode(args.mode)
-        return cmd_extend(fl, args.seconds, args.underscan, args.stretch_x, mode, args.v_shift)
+        return cmd_extend(
+            fl, args.seconds, args.underscan, args.stretch_x, mode, args.v_shift, args.place
+        )
     rc = 0
     if args.cmd in ("dump", "all"):
         cmd_dump(fl)

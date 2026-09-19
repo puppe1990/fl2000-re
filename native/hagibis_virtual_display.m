@@ -87,7 +87,7 @@ static BOOL wait_online(CGDirectDisplayID display_id) {
     return NO;
 }
 
-static BOOL arrange_right_of_others(CGDirectDisplayID virtual_id) {
+static BOOL arrange_beside_others(CGDirectDisplayID virtual_id, BOOL place_left) {
     CGDirectDisplayID ids[16];
     uint32_t n = 0;
     if (CGGetActiveDisplayList(16, ids, &n) != kCGErrorSuccess)
@@ -103,7 +103,9 @@ static BOOL arrange_right_of_others(CGDirectDisplayID virtual_id) {
     }
     if (!any)
         return NO;
-    int32_t x = (int32_t)CGRectGetMaxX(union_r);
+    int32_t width = (int32_t)CGDisplayBounds(virtual_id).size.width;
+    int32_t x = place_left ? (int32_t)CGRectGetMinX(union_r) - width
+                           : (int32_t)CGRectGetMaxX(union_r);
     int32_t y = (int32_t)CGRectGetMinY(union_r);
     CGDisplayConfigRef cfg = NULL;
     if (CGBeginDisplayConfiguration(&cfg) != kCGErrorSuccess)
@@ -123,6 +125,7 @@ int main(int argc, char **argv) {
         unsigned vendor = parse_u(argc, argv, "--vendor", 0xF200);
         unsigned product = parse_u(argc, argv, "--product", 0x0E00);
         const char *name = parse_s(argc, argv, "--name", "Hagibis");
+        BOOL place_left = strcmp(parse_s(argc, argv, "--place", "right"), "left") == 0;
 
         Class descCls = NSClassFromString(@"CGVirtualDisplayDescriptor");
         Class dispCls = NSClassFromString(@"CGVirtualDisplay");
@@ -174,8 +177,9 @@ int main(int argc, char **argv) {
             fprintf(stderr, "virtual display %u did not come online\n", display_id);
             return 1;
         }
-        if (!arrange_right_of_others(display_id)) {
-            fprintf(stderr, "warning: could not place virtual display to the right\n");
+        if (!arrange_beside_others(display_id, place_left)) {
+            fprintf(stderr, "warning: could not place virtual display to the %s\n",
+                    place_left ? "left" : "right");
         }
 
         CGRect bounds = CGDisplayBounds(display_id);

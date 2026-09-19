@@ -22,6 +22,8 @@ HELPER_NAME = "hagibis_virtual_display"
 VIRTUAL_VENDOR_ID = 0xF200
 VIRTUAL_PRODUCT_ID = 0x0E00
 VIRTUAL_DISPLAY_NAME = "Hagibis"
+PLACE_LEFT, PLACE_RIGHT = "left", "right"
+VALID_PLACES = (PLACE_LEFT, PLACE_RIGHT)
 READY_TIMEOUT_S = 8.0
 
 
@@ -159,7 +161,10 @@ def spawn_virtual_display(
     read_ready: ReadReadyFn | None = None,
     width: int | None = None,
     height: int | None = None,
+    place: str = PLACE_RIGHT,
 ) -> VirtualScreenHandle:
+    if place not in VALID_PLACES:
+        raise ValueError(f"place must be one of {VALID_PLACES}, got place={place!r}")
     desk_w, desk_h = default_virtual_desktop_size()
     width = width or desk_w
     height = height or desk_h
@@ -180,6 +185,8 @@ def spawn_virtual_display(
         hex(VIRTUAL_VENDOR_ID),
         "--product",
         hex(VIRTUAL_PRODUCT_ID),
+        "--place",
+        place,
     ]
     proc = popen(argv, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, bufsize=1)
     reader = read_ready or read_virtual_ready_line

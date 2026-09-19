@@ -129,6 +129,7 @@ def cmd_extend(
     stretch_x: float = 1.0,
     mode: VideoMode | None = None,
     v_shift: int = 0,
+    place: str = "right",
 ) -> int:
     """Create a WindowServer display and pump it to the Hagibis (not a clone of the Air)."""
     from PIL import Image
@@ -138,7 +139,7 @@ def cmd_extend(
     mode = default_mirror_mode() if mode is None else mode
     fmt = "RGB332" if mode.bpp == 1 else "RGB565"
     print(f"== tela extra (extend) → HDMI {mode.width}x{mode.height} {fmt} ==")
-    handle = spawn_virtual_display(width=mode.width, height=mode.height)
+    handle = spawn_virtual_display(width=mode.width, height=mode.height, place=place)
     try:
         screen = handle.screen
         print(
