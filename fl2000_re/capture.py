@@ -8,12 +8,13 @@ import tempfile
 from collections.abc import Callable
 from pathlib import Path
 
+from fl2000_re.cursor_overlay import overlay_cursor_on_rgb
 from fl2000_re.letterbox import UNDERSCAN, fit_rgb888
 
 Grabber = Callable[[], tuple[bytes, int, int]]
 BoundsOf = Callable[[int], tuple[int, int, int, int]]
 RegionGrabber = Callable[[int, int, int, int], tuple[bytes, int, int]]
-DisplayGrabber = Callable[[int], tuple[bytes, int, int]]
+CursorOverlay = Callable[[bytes, int, int, int, int, int, int], bytes]
 
 
 def mss_hidpi_image_options() -> int:
@@ -48,18 +49,15 @@ def grab_cg_display_rgb(
     bounds_of: BoundsOf | None = None,
     grab_bounds: RegionGrabber | None = None,
     include_cursor: bool = False,
-    grab_display: DisplayGrabber | None = None,
+    overlay_cursor: CursorOverlay | None = None,
 ) -> tuple[bytes, int, int]:
     """Capture one CGDirectDisplayID (the virtual Hagibis desktop, not the Air).
 
-    include_cursor uses screencapture -D -C. -C is a no-op with -R on a
-    CGVirtualDisplay (byte-identical with/without -C, 2026-09-19).
+    include_cursor blits NSCursor onto an mss grab. screencapture -C is a no-op
+    with -R on CGVirtualDisplay (byte-identical, 2026-09-19) and costs ~134ms.
 
     Example: grab_cg_display_rgb(18, include_cursor=True)
     """
-    if include_cursor:
-        grab_display = grab_display or _screencapture_display_rgb
-        return grab_display(display_id)
     bounds_of = bounds_of or cg_display_bounds
     grab_bounds = grab_bounds or grab_region_rgb
     left, top, width, height = bounds_of(display_id)
@@ -67,7 +65,11 @@ def grab_cg_display_rgb(
         raise ValueError(
             f"CG display {display_id} bounds too small: {width}x{height} at ({left},{top})"
         )
-    return grab_bounds(left, top, width, height)
+    rgb, out_w, out_h = grab_bounds(left, top, width, height)
+    if not include_cursor:
+        return rgb, out_w, out_h
+    overlay = overlay_cursor or overlay_cursor_on_rgb
+    return overlay(rgb, out_w, out_h, left, top, width, height), out_w, out_h
 
 
 def cg_display_bounds(display_id: int) -> tuple[int, int, int, int]:
@@ -149,13 +151,24 @@ def screencapture_rect_args(
     return args
 
 
+_MSS_CLIENT = None
+
+
+def _mss_client():
+    """Reuse one mss connection; constructing MSS every frame capped extend at ~37 fps."""
+    global _MSS_CLIENT
+    import mss
+    import mss.darwin as darwin
+
+    darwin.IMAGE_OPTIONS = mss_hidpi_image_options()
+    if _MSS_CLIENT is None:
+        _MSS_CLIENT = mss.MSS()
+    return _MSS_CLIENT
+
+
 def _try_mss_primary() -> tuple[bytes, int, int] | None:
     try:
-        import mss
-        import mss.darwin as darwin
-
-        darwin.IMAGE_OPTIONS = mss_hidpi_image_options()
-        sct = mss.MSS()
+        sct = _mss_client()
         mons = sct.monitors
         if len(mons) < 2 or mons[1].get("width", 0) < 64:
             return None
@@ -169,11 +182,7 @@ def _try_mss_primary() -> tuple[bytes, int, int] | None:
 
 def _try_mss_region(left: int, top: int, width: int, height: int) -> tuple[bytes, int, int] | None:
     try:
-        import mss
-        import mss.darwin as darwin
-
-        darwin.IMAGE_OPTIONS = mss_hidpi_image_options()
-        sct = mss.MSS()
+        sct = _mss_client()
         shot = sct.grab({"left": left, "top": top, "width": width, "height": height})
         return shot.rgb, shot.width, shot.height
     except Exception:
@@ -188,6 +197,20 @@ def _screencapture_rect_rgb(
     left: int, top: int, width: int, height: int, include_cursor: bool = False
 ) -> tuple[bytes, int, int]:
     return _screencapture_to_rgb(screencapture_rect_args(left, top, width, height, include_cursor))
+
+
+def grab_via_screencapture(display_id: int | None = None) -> tuple[bytes, int, int]:
+    """Parent-process grab via the screencapture CLI (a separate process).
+
+    mss.grab() calls CGImageGetWidth via ctypes; a stale CGImage SIGSEGVs
+    this interpreter (2026-09-19 crash, KERN_INVALID_ADDRESS). Never call
+    mss in the USB process.
+
+    Example: grab_via_screencapture(18)
+    """
+    if display_id is None:
+        return _screencapture_rgb()
+    return _screencapture_display_rgb(display_id)
 
 
 def _screencapture_display_rgb(display_id: int) -> tuple[bytes, int, int]:
