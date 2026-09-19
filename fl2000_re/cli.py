@@ -15,7 +15,19 @@ def build_parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(description="Hagibis FL2000 reverse-engineering probe")
     ap.add_argument(
         "cmd",
-        choices=["dump", "detect", "edid", "bars", "mirror", "extend", "monitor-log", "all"],
+        choices=[
+            "dump",
+            "detect",
+            "edid",
+            "bars",
+            "mirror",
+            "extend",
+            "extend-agent",
+            "install-agent",
+            "uninstall-agent",
+            "monitor-log",
+            "all",
+        ],
     )
     ap.add_argument("--seconds", type=float, default=8.0, help="0 = ate Ctrl+C (mirror/extend)")
     ap.add_argument("--monitor", type=int, default=1, help="indice mss do display (1=principal)")
@@ -56,11 +68,18 @@ def build_parser() -> argparse.ArgumentParser:
         help="ponteiro no HDMI (desligue com --no-cursor para mais fps)",
     )
     ap.add_argument("--out", default=None, help="arquivo .jsonl do monitor-log")
+    ap.add_argument(
+        "--now",
+        action="store_true",
+        help="install-agent: liga o LaunchAgent nesta sessão (briga com extend no Terminal)",
+    )
     return ap
 
 
 def main() -> int:
     args = build_parser().parse_args()
+    if args.cmd in {"install-agent", "uninstall-agent", "extend-agent"}:
+        return _agent_cmd(args.cmd, args.now)
     try:
         fl = FL2000()
     except DongleNotFoundError as exc:
@@ -97,3 +116,13 @@ def main() -> int:
     if args.cmd == "bars":
         rc = cmd_bars(fl, args.seconds)
     return rc
+
+
+def _agent_cmd(cmd: str, now: bool) -> int:
+    from fl2000_re.launch_agent import cmd_extend_agent, cmd_install_agent, cmd_uninstall_agent
+
+    if cmd == "install-agent":
+        return cmd_install_agent(now=now)
+    if cmd == "uninstall-agent":
+        return cmd_uninstall_agent()
+    return cmd_extend_agent()
