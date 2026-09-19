@@ -4,6 +4,40 @@ from fl2000_re.cli import build_parser
 from fl2000_re.letterbox import UNDERSCAN
 
 
+def test_cli_accepts_install_agent():
+    ns = build_parser().parse_args(["install-agent"])
+    assert ns.cmd == "install-agent"
+    assert ns.now is False
+
+
+def test_cli_install_agent_now_flag():
+    ns = build_parser().parse_args(["install-agent", "--now"])
+    assert ns.now is True
+
+
+def test_cli_accepts_uninstall_agent():
+    ns = build_parser().parse_args(["uninstall-agent"])
+    assert ns.cmd == "uninstall-agent"
+
+
+def test_cli_main_install_agent_skips_usb(monkeypatch):
+    import sys
+
+    from fl2000_re import cli
+
+    seen: dict[str, object] = {}
+
+    def fake_install(*, now: bool = False) -> int:
+        seen["now"] = now
+        return 0
+
+    monkeypatch.setattr(cli, "FL2000", lambda: (_ for _ in ()).throw(AssertionError("USB")))
+    monkeypatch.setattr("fl2000_re.launch_agent.cmd_install_agent", fake_install)
+    monkeypatch.setattr(sys, "argv", ["hagibis_re.py", "install-agent"])
+    assert cli.main() == 0
+    assert seen == {"now": False}
+
+
 def test_cli_accepts_extend():
     ns = build_parser().parse_args(["extend", "--seconds", "0"])
     assert ns.cmd == "extend"
