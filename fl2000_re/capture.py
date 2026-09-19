@@ -6,7 +6,6 @@ from __future__ import annotations
 import subprocess
 import tempfile
 from collections.abc import Callable
-from functools import partial
 from pathlib import Path
 
 from fl2000_re.letterbox import UNDERSCAN, fit_rgb888
@@ -14,6 +13,7 @@ from fl2000_re.letterbox import UNDERSCAN, fit_rgb888
 Grabber = Callable[[], tuple[bytes, int, int]]
 BoundsOf = Callable[[int], tuple[int, int, int, int]]
 RegionGrabber = Callable[[int, int, int, int], tuple[bytes, int, int]]
+DisplayGrabber = Callable[[int], tuple[bytes, int, int]]
 
 
 def mss_hidpi_image_options() -> int:
@@ -48,15 +48,20 @@ def grab_cg_display_rgb(
     bounds_of: BoundsOf | None = None,
     grab_bounds: RegionGrabber | None = None,
     include_cursor: bool = False,
+    grab_display: DisplayGrabber | None = None,
 ) -> tuple[bytes, int, int]:
     """Capture one CGDirectDisplayID (the virtual Hagibis desktop, not the Air).
 
-    include_cursor forces the screencapture path (-C) so the pointer shows up on
-    the virtual desktop; CGWindowListCreateImage never draws it.
+    include_cursor uses screencapture -D -C. -C is a no-op with -R on a
+    CGVirtualDisplay (byte-identical with/without -C, 2026-09-19).
+
+    Example: grab_cg_display_rgb(18, include_cursor=True)
     """
+    if include_cursor:
+        grab_display = grab_display or _screencapture_display_rgb
+        return grab_display(display_id)
     bounds_of = bounds_of or cg_display_bounds
-    if grab_bounds is None:
-        grab_bounds = partial(grab_region_rgb, include_cursor=include_cursor)
+    grab_bounds = grab_bounds or grab_region_rgb
     left, top, width, height = bounds_of(display_id)
     if width < 1 or height < 1:
         raise ValueError(
@@ -94,10 +99,50 @@ def grab_region_rgb(
     return _screencapture_rect_rgb(left, top, width, height, include_cursor)
 
 
+def screencapture_display_index(display_id: int, online_ids: list[int]) -> int:
+    """1-based screencapture -D index. 1 is main (CGGetOnlineDisplayList order).
+
+    Example: screencapture_display_index(18, [1, 2, 18]) == 3
+    """
+    try:
+        return online_ids.index(display_id) + 1
+    except ValueError as exc:
+        raise ValueError(f"CG display {display_id} not in online list {online_ids}") from exc
+
+
+def screencapture_display_args(
+    display_id: int,
+    include_cursor: bool = False,
+    online_ids: list[int] | None = None,
+) -> list[str]:
+    """screencapture -D flags. -C only composites the pointer with -D, not -R.
+
+    Example: screencapture_display_args(18, True, [1, 2, 18]) == ['-D3', '-C']
+    """
+    ids = online_ids if online_ids is not None else online_display_ids()
+    args = [f"-D{screencapture_display_index(display_id, ids)}"]
+    if include_cursor:
+        args.append("-C")
+    return args
+
+
+def online_display_ids() -> list[int]:
+    """Online CGDirectDisplayIDs, main first (screencapture -D1 is main).
+
+    Example: online_display_ids()[:1] is the built-in Air.
+    """
+    ids = _cg_online_display_ids()
+    if not ids:
+        raise ValueError(
+            "CGGetOnlineDisplayList returned no displays (expected >=1 CGDirectDisplayID)"
+        )
+    return ids
+
+
 def screencapture_rect_args(
     left: int, top: int, width: int, height: int, include_cursor: bool = False
 ) -> list[str]:
-    """screencapture flags for a rect; -C draws the mouse pointer into the shot."""
+    """screencapture -R flags. -C is ignored for a rect; use screencapture_display_args."""
     args = ["-R", f"{left},{top},{width},{height}"]
     if include_cursor:
         args.append("-C")
@@ -145,14 +190,40 @@ def _screencapture_rect_rgb(
     return _screencapture_to_rgb(screencapture_rect_args(left, top, width, height, include_cursor))
 
 
-def _screencapture_to_rgb(extra: list[str]) -> tuple[bytes, int, int]:
+def _screencapture_display_rgb(display_id: int) -> tuple[bytes, int, int]:
+    # png: jpeg smears the 16px pointer on 640x480.
+    return _screencapture_to_rgb(
+        screencapture_display_args(display_id, include_cursor=True),
+        image_format="png",
+    )
+
+
+def _cg_online_display_ids() -> list[int]:
+    import ctypes
+
+    core = ctypes.cdll.LoadLibrary(
+        "/System/Library/Frameworks/CoreGraphics.framework/Versions/Current/CoreGraphics"
+    )
+    max_displays = 16
+    ids = (ctypes.c_uint32 * max_displays)()
+    count = ctypes.c_uint32()
+    core.CGGetOnlineDisplayList.restype = ctypes.c_int32
+    err = core.CGGetOnlineDisplayList(max_displays, ids, ctypes.byref(count))
+    if err != 0:
+        raise ValueError(f"CGGetOnlineDisplayList failed: err={err} (expected 0)")
+    return [int(ids[i]) for i in range(count.value)]
+
+
+def _screencapture_to_rgb(extra: list[str], image_format: str = "jpg") -> tuple[bytes, int, int]:
     from PIL import Image
 
-    with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as fh:
+    if image_format not in {"jpg", "png"}:
+        raise ValueError(f"screencapture format {image_format!r} not in {{'jpg', 'png'}}")
+    with tempfile.NamedTemporaryFile(suffix=f".{image_format}", delete=False) as fh:
         path = Path(fh.name)
     try:
         subprocess.run(
-            ["screencapture", "-x", "-t", "jpg", *extra, str(path)],
+            ["screencapture", "-x", "-t", image_format, *extra, str(path)],
             check=True,
             timeout=5,
         )

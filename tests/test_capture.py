@@ -4,16 +4,51 @@ import mss.darwin as darwin
 from fl2000_re.capture import (
     grab_letterboxed_rgb,
     mss_hidpi_image_options,
+    screencapture_display_args,
+    screencapture_display_index,
     screencapture_rect_args,
 )
 
 
-def test_screencapture_rect_args_include_cursor_flag():
-    """The virtual desktop must show the pointer or the user cannot aim."""
-    args = screencapture_rect_args(10, 20, 30, 40, include_cursor=True)
-    assert "-C" in args
-    assert "-R" in args
-    assert "10,20,30,40" in args
+def test_screencapture_display_index_is_one_based_main_first():
+    """screencapture -D1 is the main display; CGGetOnlineDisplayList matches."""
+    assert screencapture_display_index(18, [1, 2, 18]) == 3
+
+
+def test_screencapture_display_index_rejects_unknown_id():
+    try:
+        screencapture_display_index(99, [1, 2, 18])
+    except ValueError as exc:
+        assert "99" in str(exc)
+        assert "[1, 2, 18]" in str(exc)
+        return
+    raise AssertionError("expected ValueError for display 99 not in [1, 2, 18]")
+
+
+def test_screencapture_display_args_include_cursor_uses_D_not_R():
+    """-C is a no-op with -R on CGVirtualDisplay; -D composites the pointer."""
+    args = screencapture_display_args(18, include_cursor=True, online_ids=[1, 2, 18])
+    assert args == ["-D3", "-C"]
+    assert "-R" not in args
+
+
+def test_online_display_ids_returns_cg_list(monkeypatch):
+    from fl2000_re import capture
+
+    monkeypatch.setattr(capture, "_cg_online_display_ids", lambda: [1, 2, 18])
+    assert capture.online_display_ids() == [1, 2, 18]
+
+
+def test_online_display_ids_rejects_empty(monkeypatch):
+    from fl2000_re import capture
+
+    monkeypatch.setattr(capture, "_cg_online_display_ids", lambda: [])
+    try:
+        capture.online_display_ids()
+    except ValueError as exc:
+        assert "no displays" in str(exc)
+        return
+    raise AssertionError("expected ValueError for empty online list")
 
 
 def test_screencapture_rect_args_omit_cursor_by_default():
@@ -38,19 +73,18 @@ def test_grab_region_rgb_uses_screencapture_when_cursor_requested(monkeypatch):
     assert (rgb, width, height) == (b"\x01\x02\x03", 1, 1)
 
 
-def test_grab_cg_display_rgb_forwards_include_cursor(monkeypatch):
-    from fl2000_re import capture
+def test_grab_cg_display_rgb_uses_display_capture_for_cursor():
+    from fl2000_re.capture import grab_cg_display_rgb
 
-    seen: list[bool] = []
+    seen: list[int] = []
 
-    def fake_region(left, top, width, height, include_cursor=False):  # noqa: ANN001
-        seen.append(include_cursor)
-        return b"\x01\x02\x03" * (width * height), width, height
+    def fake_display(display_id: int) -> tuple[bytes, int, int]:
+        seen.append(display_id)
+        return b"\x01\x02\x03" * 8, 4, 2
 
-    monkeypatch.setattr(capture, "grab_region_rgb", fake_region)
-    monkeypatch.setattr(capture, "cg_display_bounds", lambda _d: (0, 0, 4, 2))
-    capture.grab_cg_display_rgb(7, include_cursor=True)
-    assert seen == [True]
+    rgb, width, height = grab_cg_display_rgb(18, include_cursor=True, grab_display=fake_display)
+    assert seen == [18]
+    assert (rgb, width, height) == (b"\x01\x02\x03" * 8, 4, 2)
 
 
 def test_grab_letterboxed_rgb_uses_injected_grabber():
