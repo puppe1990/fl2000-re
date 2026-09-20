@@ -157,14 +157,20 @@ def cmd_uninstall_agent(run: RunFn = subprocess.run) -> int:
 
 
 def cmd_extend_agent() -> int:
-    """Wait for the dongle, drop the fake CD, then extend (LaunchAgent entry)."""
+    """Wait for the dongle, drop the fake CD, then extend (LaunchAgent entry).
+
+    cursor=False: the NSCursor overlay (AppKit objc_msgSend) blocks forever in a
+    launchd Aqua agent with no AppKit run loop, freezing the capture child on its
+    first frame (2026-09-20, cursor overlay + LaunchAgent). A terminal run can
+    still request the pointer.
+    """
     print("aguardando o Hagibis USB (1d5c:2000)...")
     wait_for_dongle()
     unmount_fake_cd()
     from fl2000_re.fl2000_usb import FL2000
     from fl2000_re.stream import cmd_extend
 
-    return cmd_extend(FL2000(), 0, 1.0, 1.0, MODE_640x480, 0, "left", True)
+    return cmd_extend(FL2000(), 0, 1.0, 1.0, MODE_640x480, 0, "left", False)
 
 
 def _gui_target() -> str:
