@@ -17,6 +17,13 @@ RegionGrabber = Callable[[int, int, int, int], tuple[bytes, int, int]]
 CursorOverlay = Callable[[bytes, int, int, int, int, int, int], bytes]
 
 
+class ScreencaptureError(RuntimeError):
+    """screencapture CLI failed or hung (WindowServer busy); retry or skip the frame.
+
+    Example: except ScreencaptureError: keep_last_frame()
+    """
+
+
 def mss_hidpi_image_options() -> int:
     """Drop NominalResolution so CG returns 3420x2214, not the smeared 1710x1107."""
     import mss.darwin as darwin
@@ -237,20 +244,33 @@ def _cg_online_display_ids() -> list[int]:
     return [int(ids[i]) for i in range(count.value)]
 
 
-def _screencapture_to_rgb(extra: list[str], image_format: str = "jpg") -> tuple[bytes, int, int]:
+def _screencapture_to_rgb(
+    extra: list[str], image_format: str = "jpg", timeout_s: float = 5.0
+) -> tuple[bytes, int, int]:
     from PIL import Image
 
     if image_format not in {"jpg", "png"}:
         raise ValueError(f"screencapture format {image_format!r} not in {{'jpg', 'png'}}")
     with tempfile.NamedTemporaryFile(suffix=f".{image_format}", delete=False) as fh:
         path = Path(fh.name)
+    cmd = ["screencapture", "-x", "-t", image_format, *extra, str(path)]
     try:
-        subprocess.run(
-            ["screencapture", "-x", "-t", image_format, *extra, str(path)],
-            check=True,
-            timeout=5,
-        )
+        _run_screencapture(cmd, timeout_s)
         im = Image.open(path).convert("RGB")
         return im.tobytes(), im.width, im.height
     finally:
         path.unlink(missing_ok=True)
+
+
+def _run_screencapture(cmd: list[str], timeout_s: float) -> None:
+    """Run the screencapture CLI; a hang/failure becomes ScreencaptureError, not a crash."""
+    try:
+        subprocess.run(cmd, check=True, timeout=timeout_s, capture_output=True)
+    except subprocess.TimeoutExpired as exc:
+        raise ScreencaptureError(
+            f"screencapture travou por {timeout_s:g}s (args={cmd}); WindowServer ocupado?"
+        ) from exc
+    except subprocess.CalledProcessError as exc:
+        raise ScreencaptureError(
+            f"screencapture saiu com código {exc.returncode} (args={cmd})"
+        ) from exc

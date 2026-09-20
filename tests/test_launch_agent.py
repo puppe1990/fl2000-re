@@ -6,6 +6,7 @@ from pathlib import Path
 from fl2000_re.launch_agent import (
     LABEL,
     _bootstrap,
+    cmd_extend_agent,
     render_plist,
     unmount_fake_cd,
     wait_for_dongle,
@@ -116,3 +117,23 @@ def test_unmount_fake_cd_runs_diskutil(tmp_path: Path):
     seen: list[list[str]] = []
     unmount_fake_cd(volume=vol, run=lambda cmd, **_k: seen.append(cmd))
     assert seen == [["diskutil", "unmountDisk", str(vol)]]
+
+
+def test_cmd_extend_agent_disables_cursor(monkeypatch):
+    """Regression 2026-09-20: the NSCursor overlay hangs a launchd Aqua agent."""
+    import fl2000_re.launch_agent as launch_agent
+    import fl2000_re.stream as stream
+    from fl2000_re import fl2000_usb
+
+    monkeypatch.setattr(launch_agent, "wait_for_dongle", lambda *_a, **_k: True)
+    monkeypatch.setattr(launch_agent, "unmount_fake_cd", lambda *_a, **_k: None)
+    monkeypatch.setattr(fl2000_usb, "FL2000", lambda *_a, **_k: object())
+    seen: dict[str, object] = {}
+
+    def fake_extend(_fl, _seconds, _underscan, _stretch_x, _mode, _v_shift, _place, cursor):
+        seen["cursor"] = cursor
+        return 0
+
+    monkeypatch.setattr(stream, "cmd_extend", fake_extend)
+    assert cmd_extend_agent() == 0
+    assert seen["cursor"] is False

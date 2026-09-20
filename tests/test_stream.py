@@ -265,6 +265,32 @@ def test_ensure_capture_keeps_live_child(capsys):
     assert capsys.readouterr().out == ""
 
 
+def test_ensure_capture_allows_slow_first_frame(capsys):
+    """Regression 2026-09-20: a cold spawn child needs >5s to import and grab once."""
+    capture = FakeCapture(alive=True, counter_value=1, restarts=1)
+    alive, _, _ = stream._ensure_capture(
+        capture,
+        last_cap=1,
+        last_progress=0.0,
+        now=stream.CAPTURE_STALL_S + 1,
+        stall_s=stream.CAPTURE_START_S,
+    )
+    assert alive is True
+    assert capture.restart_calls == 0
+    assert capsys.readouterr().out == ""
+
+
+def test_capture_process_has_frame_tracks_counter(monkeypatch):
+    monkeypatch.setattr(stream.mp, "Process", FakeProcess)
+    capture = stream.CaptureProcess(bytes(512), MODE_640x480, None, 1.0, 1.0, False)
+    assert capture.has_frame() is False
+    capture.start()
+    assert capture.has_frame() is False
+    capture.counter.value += 1
+    assert capture.has_frame() is True
+    capture.stop_and_join()
+
+
 class TickingCapture:
     """Counter advances on every read; guards the stats-delta regression."""
 
@@ -279,6 +305,9 @@ class TickingCapture:
         return self._n
 
     def alive(self) -> bool:
+        return True
+
+    def has_frame(self) -> bool:
         return True
 
     def exitcode(self) -> None:
@@ -448,11 +477,15 @@ def _stub_extend_preview(monkeypatch, tmp_path):
         seen["pace_cursor"] = kwargs.get("cursor")
         return 0
 
+    def fake_bring_up(*_a, **_k):
+        seen["brought_up"] = True
+        return 0
+
     monkeypatch.setattr("fl2000_re.virtual_display.spawn_virtual_display", lambda **_k: handle)
     monkeypatch.setattr(stream, "grab_cg_display_rgb", boom_cg)
     monkeypatch.setattr(stream, "grab_main_display_rgb", boom_main)
     monkeypatch.setattr(stream, "grab_via_screencapture", fake_preview)
-    monkeypatch.setattr(stream, "bring_up_hdmi", lambda *_a, **_k: 0)
+    monkeypatch.setattr(stream, "bring_up_hdmi", fake_bring_up)
     monkeypatch.setattr(stream, "_pace_clone", fake_pace)
     return seen
 
@@ -499,6 +532,70 @@ def test_cmd_mirror_preview_never_calls_mss(monkeypatch, tmp_path):
     fl = FL2000(dev=FakeBulkDevice())
     assert stream.cmd_mirror(fl, 0.01, 1, underscan=1.0, mode=MODE_640x480) == 0
     assert (tmp_path / "preview.png").is_file()
+
+
+def test_grab_preview_retries_then_uses_black_frame(monkeypatch, capsys):
+    from fl2000_re.capture import ScreencaptureError
+
+    monkeypatch.setattr(stream, "PREVIEW_RETRY_S", 0.0)
+    calls = {"n": 0}
+
+    def hang(*_a, **_k):
+        calls["n"] += 1
+        raise ScreencaptureError("screencapture travou por 5s")
+
+    monkeypatch.setattr(stream, "grab_letterboxed_rgb", hang)
+    rgb, captured = stream._grab_preview_rgb(MODE_640x480, lambda: None, 1.0, 1.0)
+    assert captured is False
+    assert rgb == bytes(MODE_640x480.width * MODE_640x480.height * 3)
+    assert calls["n"] == stream.PREVIEW_ATTEMPTS
+    assert "fundo preto" in capsys.readouterr().out
+
+
+def test_grab_preview_returns_frame_when_capture_works(monkeypatch):
+    src = bytes([255, 0, 0]) * (64 * 48)
+    monkeypatch.setattr(stream, "grab_letterboxed_rgb", lambda *_a, **_k: src)
+    rgb, captured = stream._grab_preview_rgb(MODE_640x480, lambda: None, 1.0, 1.0)
+    assert captured is True
+    assert rgb is src
+
+
+def test_cmd_extend_survives_hung_preview(monkeypatch, tmp_path):
+    """Regression 2026-09-20: a screencapture timeout must not kill extend."""
+    from fl2000_re.capture import ScreencaptureError
+
+    seen = _stub_extend_preview(monkeypatch, tmp_path)
+    monkeypatch.setattr(stream, "PREVIEW_RETRY_S", 0.0)
+
+    def hang(_display_id=None):
+        raise ScreencaptureError("screencapture travou por 5s")
+
+    monkeypatch.setattr(stream, "grab_via_screencapture", hang)
+    fl = FL2000(dev=FakeBulkDevice())
+    rc = stream.cmd_extend(
+        fl, 0.01, underscan=1.0, stretch_x=1.0, mode=MODE_640x480, place="left", cursor=False
+    )
+    assert rc == 0
+    assert seen.get("brought_up") is True
+    assert seen["pace_display"] == 18
+    assert not (tmp_path / "preview.png").exists()
+
+
+def test_cmd_mirror_survives_hung_preview(monkeypatch, tmp_path):
+    from fl2000_re.capture import ScreencaptureError
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(stream, "PREVIEW_RETRY_S", 0.0)
+    monkeypatch.setattr(
+        stream,
+        "grab_via_screencapture",
+        lambda *_a, **_k: (_ for _ in ()).throw(ScreencaptureError("screencapture travou por 5s")),
+    )
+    monkeypatch.setattr(stream, "bring_up_hdmi", lambda *_a, **_k: 0)
+    monkeypatch.setattr(stream, "_pace_clone", lambda *_a, **_k: 0)
+    fl = FL2000(dev=FakeBulkDevice())
+    assert stream.cmd_mirror(fl, 0.01, 1, underscan=1.0, mode=MODE_640x480) == 0
+    assert not (tmp_path / "preview.png").exists()
 
 
 def test_wall_minus_uptime_gap_is_sleep_duration():

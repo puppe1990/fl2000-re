@@ -1,6 +1,9 @@
 """Screen grab is injected; unit tests never call mss or screencapture."""
 
+import subprocess
+
 import mss.darwin as darwin
+import pytest
 from fl2000_re.capture import (
     grab_letterboxed_rgb,
     mss_hidpi_image_options,
@@ -219,3 +222,26 @@ def test_grab_cg_display_rgb_uses_injected_bounds_and_region():
     rgb, width, height = grab_cg_display_rgb(7, bounds_of=bounds_of, grab_bounds=grab_bounds)
     assert (width, height) == (4, 2)
     assert rgb == src
+
+
+def test_screencapture_timeout_raises_screencapture_error(monkeypatch):
+    """A WindowServer hang must be catchable, not a raw subprocess.TimeoutExpired."""
+    from fl2000_re import capture
+
+    def hang(*_a, **_k):
+        raise subprocess.TimeoutExpired(cmd="screencapture", timeout=5)
+
+    monkeypatch.setattr(capture.subprocess, "run", hang)
+    with pytest.raises(capture.ScreencaptureError, match="travou"):
+        capture._screencapture_to_rgb(["-D3", "-C"], image_format="png")
+
+
+def test_screencapture_failure_raises_screencapture_error(monkeypatch):
+    from fl2000_re import capture
+
+    def fail(*_a, **_k):
+        raise subprocess.CalledProcessError(returncode=1, cmd="screencapture")
+
+    monkeypatch.setattr(capture.subprocess, "run", fail)
+    with pytest.raises(capture.ScreencaptureError, match="código 1"):
+        capture._screencapture_to_rgb(["-R", "0,0,4,2"])

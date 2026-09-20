@@ -11,6 +11,7 @@ import usb.util
 
 from fl2000_re.capture import (
     Grabber,
+    ScreencaptureError,
     grab_cg_display_rgb,
     grab_letterboxed_rgb,
     grab_main_display_rgb,
@@ -28,6 +29,9 @@ TARGET_FPS = 60
 WAKE_GAP_S = 3.0
 MAX_CAPTURE_RESTARTS = 5
 CAPTURE_STALL_S = 5.0
+CAPTURE_START_S = 20.0
+PREVIEW_ATTEMPTS = 2
+PREVIEW_RETRY_S = 0.3
 
 
 class SystemWakeError(RuntimeError):
@@ -169,8 +173,10 @@ class CaptureProcess:
         self.grab_ms = mp.Value("d", 0.0)
         self.stop = mp.Event()
         self.proc = None
+        self._baseline = self.counter.value
 
     def start(self) -> None:
+        self._baseline = self.counter.value
         self.proc = mp.Process(target=hdmi_capture_worker, args=self._worker_args(), daemon=True)
         self.proc.start()
 
@@ -192,6 +198,10 @@ class CaptureProcess:
 
     def alive(self) -> bool:
         return self.proc is not None and self.proc.is_alive()
+
+    def has_frame(self) -> bool:
+        """True once the current child has produced a frame (import+first grab done)."""
+        return self.counter.value != self._baseline
 
     def exitcode(self) -> int | None:
         return None if self.proc is None else self.proc.exitcode
@@ -276,6 +286,34 @@ def _stream_bottleneck(capture_fps: float, usb_fps: float, target_fps: int, curs
     return "gargalo: nenhum"
 
 
+def _grab_preview_rgb(
+    mode: VideoMode,
+    grab: Grabber,
+    underscan: float,
+    stretch_x: float,
+) -> tuple[bytes, bool]:
+    """Best-effort preview: (rgb, captured). captured=False means use a black frame.
+
+    A WindowServer-busy screencapture (-D/-R) can outlast its 5s timeout; that
+    TimeoutExpired used to propagate and the LaunchAgent restart-looped, spawning
+    a fresh virtual display every ~10s (2026-09-20). Retry once, then let extend
+    come up on black so the capture worker can fill the real desktop.
+    """
+    for attempt in range(1, PREVIEW_ATTEMPTS + 1):
+        try:
+            rgb = grab_letterboxed_rgb(
+                mode.width, mode.height, grab=grab, underscan=underscan, stretch_x=stretch_x
+            )
+            return rgb, True
+        except ScreencaptureError as exc:
+            if attempt >= PREVIEW_ATTEMPTS:
+                print(f"  preview indisponivel ({exc}); subindo o HDMI com fundo preto.")
+                break
+            print(f"  preview tentativa {attempt}/{PREVIEW_ATTEMPTS} falhou ({exc}); repetindo.")
+            time.sleep(PREVIEW_RETRY_S)
+    return bytes(mode.width * mode.height * 3), False
+
+
 def cmd_mirror(
     fl: FL2000,
     seconds: float,
@@ -292,16 +330,11 @@ def cmd_mirror(
 
     print(f"  capturando display (monitor={monitor})")
     # screencapture subprocess: mss.grab in this process SIGSEGVs (CGImageGetWidth).
-    rgb = grab_letterboxed_rgb(
-        mode.width,
-        mode.height,
-        grab=grab_via_screencapture,
-        underscan=underscan,
-        stretch_x=stretch_x,
-    )
-    Image.frombytes("RGB", (mode.width, mode.height), rgb).save("preview.png")
-    print("  gravou preview.png (o que vai pro HDMI)")
-    if max(rgb) < 12:
+    rgb, captured = _grab_preview_rgb(mode, grab_via_screencapture, underscan, stretch_x)
+    if captured:
+        Image.frombytes("RGB", (mode.width, mode.height), rgb).save("preview.png")
+        print("  gravou preview.png (o que vai pro HDMI)")
+    if captured and max(rgb) < 12:
         print(
             "  captura preta. Em Ajustes → Privacidade → Gravacao da Tela, "
             "libere o Terminal (ou o Python) e rode de novo."
@@ -342,15 +375,12 @@ def cmd_extend(
             "Arraste janelas para o monitor 'Hagibis'."
         )
         print("  os dois HDMI do Hagibis continuam o mesmo stream.")
-        rgb = grab_letterboxed_rgb(
-            mode.width,
-            mode.height,
-            grab=lambda: grab_via_screencapture(screen.display_id),
-            underscan=underscan,
-            stretch_x=stretch_x,
+        rgb, captured = _grab_preview_rgb(
+            mode, lambda: grab_via_screencapture(screen.display_id), underscan, stretch_x
         )
-        Image.frombytes("RGB", (mode.width, mode.height), rgb).save("preview.png")
-        print("  gravou preview.png (o que vai pro HDMI)")
+        if captured:
+            Image.frombytes("RGB", (mode.width, mode.height), rgb).save("preview.png")
+            print("  gravou preview.png (o que vai pro HDMI)")
         frame = pack_frame(rgb, mode.bpp)
         if bring_up_hdmi(fl, mode, v_shift) != 0:
             return 1
@@ -438,8 +468,12 @@ def _pump_paced_frames(
     while end_at is None or time.monotonic() < end_at:
         wall0, up0 = _raise_if_woke(wall0, up0)
         now = time.monotonic()
+        # A fresh spawn child must import mss/PIL and do its first grab before it
+        # can advance the counter; under launchd that is ~6s, past CAPTURE_STALL_S,
+        # so a 5s watchdog killed every child before its first frame (2026-09-20).
+        stall_s = CAPTURE_STALL_S if capture.has_frame() else CAPTURE_START_S
         alive, progress_cap, last_progress = _ensure_capture(
-            capture, progress_cap, last_progress, now
+            capture, progress_cap, last_progress, now, stall_s
         )
         if not alive:
             raise CaptureDeadError(
@@ -465,12 +499,16 @@ def _pump_paced_frames(
 
 
 def _ensure_capture(
-    capture: CaptureProcess, last_cap: int, last_progress: float, now: float
+    capture: CaptureProcess,
+    last_cap: int,
+    last_progress: float,
+    now: float,
+    stall_s: float = CAPTURE_STALL_S,
 ) -> tuple[bool, int, float]:
     """Restart a dead or stalled capture child; False once the budget is spent."""
     if capture.alive() and capture.counter.value != last_cap:
         return True, capture.counter.value, now
-    if capture.alive() and now - last_progress < CAPTURE_STALL_S:
+    if capture.alive() and now - last_progress < stall_s:
         return True, last_cap, last_progress
     if capture.alive():
         print(f"  captura travada (sem frames há {now - last_progress:.0f}s).", flush=True)
