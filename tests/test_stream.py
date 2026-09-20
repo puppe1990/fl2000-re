@@ -3,6 +3,7 @@
 import multiprocessing as mp
 import threading
 import time
+import types
 
 import fl2000_re.stream as stream
 import pytest
@@ -57,6 +58,39 @@ class SegfaultedCaptureProcess(FakeProcess):
         return False
 
 
+class RevivedCaptureProcess(FakeProcess):
+    """Dead on the first spawn, alive after the automatic restart."""
+
+    alive_after_restart = False
+
+    def is_alive(self) -> bool:
+        return RevivedCaptureProcess.alive_after_restart
+
+
+class FakeCapture:
+    """Stands in for CaptureProcess in _ensure_capture unit tests."""
+
+    def __init__(self, alive: bool, counter_value: int = 0, restarts: int = 1) -> None:
+        self._alive = alive
+        self.counter = types.SimpleNamespace(value=counter_value)
+        self._exitcode = -11
+        self._restarts = restarts
+        self.restart_calls = 0
+
+    def alive(self) -> bool:
+        return self._alive
+
+    def exitcode(self) -> int | None:
+        return self._exitcode
+
+    def restart(self) -> bool:
+        self.restart_calls += 1
+        if self._restarts <= 0:
+            return False
+        self._restarts -= 1
+        return True
+
+
 def test_frame_period_is_one_over_freq():
     assert frame_period_s(60) == pytest.approx(1 / 60)
 
@@ -107,6 +141,21 @@ def test_hdmi_capture_worker_forwards_fill_params(monkeypatch):
     assert seen == {"underscan": 1.0, "stretch_x": 1.1585}
 
 
+def test_capture_process_restart_respects_budget(monkeypatch, capsys):
+    monkeypatch.setattr(stream.mp, "Process", FakeProcess)
+    capture = stream.CaptureProcess(
+        bytes(512), MODE_640x480, None, 1.0, 1.0, False, restarts_left=2
+    )
+    capture.start()
+    assert capture.alive() is True
+    assert len(capture.buffer()) == 512
+    assert capture.restart() is True
+    assert capture.restart() is True
+    assert capture.restart() is False
+    assert "reiniciando a captura" in capsys.readouterr().out
+    capture.stop_and_join()
+
+
 def test_send_frame_adds_zlp_when_max_packet_aligned():
     fl = FL2000(dev=FakeBulkDevice())
     send_frame(fl, bytes(512))
@@ -147,29 +196,112 @@ def test_capture_worker_exit_message_none_and_nonzero():
     assert "CGImageGetWidth" not in code_line
 
 
-def test_pace_clone_reports_dead_capture_worker(monkeypatch, capsys):
+def test_pace_clone_gives_up_after_restart_budget(monkeypatch, capsys):
     fl = FL2000(dev=FakeBulkDevice())
     monkeypatch.setattr(stream.mp, "Process", SegfaultedCaptureProcess)
     monkeypatch.setattr(stream, "release_bulk", lambda _fl: None)
-    assert stream._pace_clone(fl, bytes(512), MODE_640x480, None, 0.05) == 0
+    assert stream._pace_clone(fl, bytes(512), MODE_640x480, None, 0.05, restart_budget=1) == 1
     out = capsys.readouterr().out
     assert "sinal 11" in out
     assert "CGImageGetWidth" in out
+    assert "sem captura" in out
     assert fl.dev.packets
-    assert out.count("sinal 11") == 1
 
 
-def test_warn_if_capture_dead_only_once(capsys):
-    class Dead:
-        exitcode = -11
+def test_pace_clone_respawns_dead_capture_and_keeps_streaming(monkeypatch, capsys):
+    """Regression 2026-09-20: a SIGKILLed capture child must be respawned."""
+    fl = FL2000(dev=FakeBulkDevice())
+    RevivedCaptureProcess.alive_after_restart = False
+    spawns = {"n": 0}
 
-        def is_alive(self) -> bool:
-            return False
+    def factory(**kwargs):
+        spawns["n"] += 1
+        if spawns["n"] >= 2:
+            RevivedCaptureProcess.alive_after_restart = True
+        return RevivedCaptureProcess(**kwargs)
 
-    dead = Dead()
-    assert stream._warn_if_capture_dead(dead, False) is True
-    assert stream._warn_if_capture_dead(dead, True) is True
-    assert capsys.readouterr().out.count("sinal 11") == 1
+    monkeypatch.setattr(stream.mp, "Process", factory)
+    monkeypatch.setattr(stream, "release_bulk", lambda _fl: None)
+    rc = stream._pace_clone(fl, bytes(512), MODE_640x480, None, 0.1, restart_budget=2)
+    assert rc == 0
+    assert spawns["n"] == 2
+    assert "reiniciando a captura" in capsys.readouterr().out
+
+
+def test_ensure_capture_restarts_dead_child(capsys):
+    capture = FakeCapture(alive=False, counter_value=7, restarts=1)
+    alive, last_cap, progress = stream._ensure_capture(capture, 0, 0.0, 10.0)
+    assert alive is True
+    assert last_cap == 7
+    assert progress == 10.0
+    assert capture.restart_calls == 1
+    assert "sinal 11" in capsys.readouterr().out
+
+
+def test_ensure_capture_gives_up_without_budget(capsys):
+    capture = FakeCapture(alive=False, restarts=0)
+    alive, _, _ = stream._ensure_capture(capture, 0, 0.0, 10.0)
+    assert alive is False
+    assert "sem captura" in capsys.readouterr().out
+
+
+def test_ensure_capture_restarts_wedged_child(capsys):
+    capture = FakeCapture(alive=True, counter_value=3, restarts=1)
+    alive, _, _ = stream._ensure_capture(
+        capture, last_cap=3, last_progress=0.0, now=stream.CAPTURE_STALL_S + 1
+    )
+    assert alive is True
+    assert capture.restart_calls == 1
+    assert "travada" in capsys.readouterr().out
+
+
+def test_ensure_capture_keeps_live_child(capsys):
+    capture = FakeCapture(alive=True, counter_value=42)
+    alive, last_cap, progress = stream._ensure_capture(capture, 10, 0.0, 1.0)
+    assert alive is True
+    assert last_cap == 42
+    assert progress == 1.0
+    assert capture.restart_calls == 0
+    assert capsys.readouterr().out == ""
+
+
+class TickingCapture:
+    """Counter advances on every read; guards the stats-delta regression."""
+
+    def __init__(self) -> None:
+        self._n = 0
+        self.counter = self
+        self.grab_ms = types.SimpleNamespace(value=5.0)
+
+    @property
+    def value(self) -> int:
+        self._n += 1
+        return self._n
+
+    def alive(self) -> bool:
+        return True
+
+    def exitcode(self) -> None:
+        return None
+
+    def restart(self) -> bool:
+        return True
+
+    def buffer(self) -> bytes:
+        return bytes(512)
+
+
+def test_pump_reports_capture_fps_when_counter_advances(monkeypatch, capsys):
+    """Regression: the stall watchdog must not consume the stats counter delta."""
+    monkeypatch.setattr(stream, "STATS_INTERVAL_S", 0.0)
+    fl = FL2000(dev=FakeBulkDevice())
+    sent = stream._pump_paced_frames(
+        fl, TickingCapture(), MODE_640x480, 0.05, time.monotonic(), "estendendo", False
+    )
+    assert sent > 0
+    out = capsys.readouterr().out
+    assert "captura 0.0 fps" not in out
+    assert "captura " in out
 
 
 def test_format_stream_stats_names_usb_bottleneck():

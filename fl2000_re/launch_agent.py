@@ -19,6 +19,8 @@ from fl2000_re.video_modes import MODE_640x480
 
 LABEL = "com.fl2000-re.extend"
 POLL_S = 2.0
+BOOTSTRAP_ATTEMPTS = 3
+BOOTSTRAP_RETRY_S = 1.0
 RunFn = Callable[..., Any]
 FindDevice = Callable[..., Any]
 
@@ -63,6 +65,8 @@ def render_plist(*, repo: Path, python: Path, log: Path) -> str:
   <dict>
     <key>PYTHONUNBUFFERED</key>
     <string>1</string>
+    <key>PYTHONWARNINGS</key>
+    <string>ignore:resource_tracker:UserWarning</string>
   </dict>
   <key>ProgramArguments</key>
   <array>
@@ -167,10 +171,18 @@ def _gui_target() -> str:
     return f"gui/{os.getuid()}/{LABEL}"
 
 
-def _bootstrap(plist: Path, run: RunFn) -> None:
+def _bootstrap(plist: Path, run: RunFn, sleep: Callable[[float], None] = time.sleep) -> None:
+    """bootout + bootstrap; retry because an immediate re-bootstrap races with EIO (5)."""
     domain = f"gui/{os.getuid()}"
     run(["launchctl", "bootout", _gui_target()], check=False)
-    run(["launchctl", "bootstrap", domain, str(plist)], check=True)
+    for attempt in range(1, BOOTSTRAP_ATTEMPTS + 1):
+        try:
+            run(["launchctl", "bootstrap", domain, str(plist)], check=True)
+            return
+        except subprocess.CalledProcessError:
+            if attempt >= BOOTSTRAP_ATTEMPTS:
+                raise
+            sleep(BOOTSTRAP_RETRY_S)
 
 
 def _bootout(run: RunFn) -> None:
