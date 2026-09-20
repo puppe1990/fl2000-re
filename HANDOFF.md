@@ -66,7 +66,12 @@ DisplayLink) ou o HDMI nativo do Mac (P2219H).
   ~35–40 fps de captura, USB 60). Letterbox 1:1 não passa de LANCZOS/unsharp. Log ao vivo a cada 1s
   (`captura N fps / USB N fps / gargalo`).
 - Preview do processo USB usa `grab_via_screencapture` — nunca `mss` no pai.
-- 179 testes; `make check` = ruff + pytest + prettier; CI verde.
+- Log com timestamp local (`log_time.py`, instalado no `cli.main`): sem ele não dava pra situar no
+  tempo o incidente de 2026-09-20. `CaptureProcess` respawna o filho de captura quando ele morre
+  (SIGKILL) ou trava (sem frames por 5s), mantendo o último frame no HDMI; esgotadas as 5 tentativas
+  o pai sai (`CaptureDeadError`) pro LaunchAgent religar. Antes, um filho morto deixava o HDMI
+  congelado pra sempre e gerava ~15 mil linhas de `captura 0.0 fps`.
+- 204 testes; `make check` = ruff + pytest + prettier; CI verde.
 - PRs mergeados #10–#19. Desta sessão: #18 (ponteiro no HDMI via `-D -C`, depois substituído pelo
   blit) e #19 (mss+blit, flags, log, SIGSEGV).
 

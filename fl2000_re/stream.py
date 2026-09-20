@@ -26,10 +26,16 @@ from fl2000_re.video_modes import MODE_640x480, VideoMode, default_mirror_mode
 STATS_INTERVAL_S = 1.0
 TARGET_FPS = 60
 WAKE_GAP_S = 3.0
+MAX_CAPTURE_RESTARTS = 5
+CAPTURE_STALL_S = 5.0
 
 
 class SystemWakeError(RuntimeError):
     """macOS slept; FL2000/IT66121 HDMI is gone but this process is still alive."""
+
+
+class CaptureDeadError(RuntimeError):
+    """Capture child died/wedged and the restart budget is spent; exit to relaunch."""
 
 
 def wall_minus_uptime_gap(
@@ -131,6 +137,92 @@ def hdmi_capture_worker(
 
 def _grab_display(display_id: int, include_cursor: bool = True) -> Grabber:
     return lambda: grab_cg_display_rgb(display_id, include_cursor=include_cursor)
+
+
+class CaptureProcess:
+    """Owns the capture child and its shared frame so a dead child can be respawned.
+
+    Pumping the last frame during a restart keeps the HDMI lit; a child killed by
+    the OS (SIGKILL) or wedged mid-grab must never freeze the desktop forever
+    (2026-09-20: signal 9 left a frozen frame and 15k "0.0 fps" log lines).
+    """
+
+    def __init__(
+        self,
+        frame: bytes,
+        mode: VideoMode,
+        display_id: int | None,
+        underscan: float,
+        stretch_x: float,
+        cursor: bool,
+        restarts_left: int = MAX_CAPTURE_RESTARTS,
+    ) -> None:
+        self._mode = mode
+        self._display_id = display_id
+        self._underscan = underscan
+        self._stretch_x = stretch_x
+        self._cursor = cursor
+        self._restarts_left = restarts_left
+        self.n = len(frame)
+        self.shm = mp.Array("B", frame, lock=False)
+        self.counter = mp.Value("i", 1)
+        self.grab_ms = mp.Value("d", 0.0)
+        self.stop = mp.Event()
+        self.proc = None
+
+    def start(self) -> None:
+        self.proc = mp.Process(target=hdmi_capture_worker, args=self._worker_args(), daemon=True)
+        self.proc.start()
+
+    def _worker_args(self) -> tuple:
+        return (
+            self._mode.width,
+            self._mode.height,
+            self._mode.bpp,
+            self._display_id,
+            self.shm,
+            self.n,
+            self.counter,
+            self.stop,
+            self._underscan,
+            self._stretch_x,
+            self._cursor,
+            self.grab_ms,
+        )
+
+    def alive(self) -> bool:
+        return self.proc is not None and self.proc.is_alive()
+
+    def exitcode(self) -> int | None:
+        return None if self.proc is None else self.proc.exitcode
+
+    def buffer(self):
+        return self.shm.get_obj() if hasattr(self.shm, "get_obj") else self.shm
+
+    def restart(self) -> bool:
+        if self._restarts_left <= 0:
+            return False
+        self._restarts_left -= 1
+        self._kill_current()
+        self.start()
+        print(f"  reiniciando a captura ({self._restarts_left} tentativas restantes).", flush=True)
+        return True
+
+    def _kill_current(self) -> None:
+        if self.proc is None:
+            return
+        with contextlib.suppress(Exception):
+            self.proc.terminate()
+        with contextlib.suppress(Exception):
+            self.proc.join(timeout=1)
+        self.proc = None
+
+    def stop_and_join(self, timeout: float = 1.0) -> None:
+        self.stop.set()
+        if self.proc is None:
+            return
+        with contextlib.suppress(Exception):
+            self.proc.join(timeout=timeout)
 
 
 def capture_worker_exit_message(exitcode: int | None) -> str:
@@ -287,41 +379,19 @@ def _pace_clone(
     underscan: float = UNDERSCAN,
     stretch_x: float = 1.0,
     cursor: bool = True,
+    restart_budget: int = MAX_CAPTURE_RESTARTS,
 ) -> int:
-    n = len(frame)
-    shm = mp.Array("B", frame, lock=False)
-    counter = mp.Value("i", 1)
-    grab_ms = mp.Value("d", 0.0)
-    stop = mp.Event()
-    proc = mp.Process(
-        target=hdmi_capture_worker,
-        args=(
-            mode.width,
-            mode.height,
-            mode.bpp,
-            display_id,
-            shm,
-            n,
-            counter,
-            stop,
-            underscan,
-            stretch_x,
-            cursor,
-            grab_ms,
-        ),
-        daemon=True,
+    capture = CaptureProcess(
+        frame, mode, display_id, underscan, stretch_x, cursor, restarts_left=restart_budget
     )
-    proc.start()
+    capture.start()
     cursor_txt = "ligado (mss+blit)" if cursor else "desligado (--no-cursor)"
     print(f"  {label} — cursor {cursor_txt}. Ctrl+C para parar. Olhe o HDMI do HAGIBIS.")
-    raw_out = shm.get_obj() if hasattr(shm, "get_obj") else shm
     t0 = time.monotonic()
     sent = 0
     rc = 1
     try:
-        sent = _pump_paced_frames(
-            fl, raw_out, mode, seconds, t0, label, counter, grab_ms, cursor, proc
-        )
+        sent = _pump_paced_frames(fl, capture, mode, seconds, t0, label, cursor)
         rc = 0 if sent else 1
     except KeyboardInterrupt:
         rc = 0 if sent else 1
@@ -331,12 +401,14 @@ def _pace_clone(
     except SystemWakeError as exc:
         print(f"  {exc}", flush=True)
         rc = 1
+    except CaptureDeadError as exc:
+        print(f"  {exc}", flush=True)
+        rc = 1
     finally:
-        stop.set()
-        proc.join(timeout=1)
+        capture.stop_and_join()
         dt = max(0.001, time.monotonic() - t0)
         print(
-            f"  USB {sent / dt:.1f} fps, captura {counter.value / dt:.1f} fps "
+            f"  USB {sent / dt:.1f} fps, captura {capture.counter.value / dt:.1f} fps "
             f"({sent} frames / {dt:.1f}s)"
         )
         release_bulk(fl)
@@ -345,15 +417,12 @@ def _pace_clone(
 
 def _pump_paced_frames(
     fl: FL2000,
-    raw_out,
+    capture: CaptureProcess,
     mode,
     seconds: float,
     t0: float,
     label: str,
-    counter,
-    grab_ms,
     cursor: bool,
-    proc=None,
 ) -> int:
     # Continuous stream: bulk idle starves the line buffer and the sink
     # blanks/resyncs (screen off/on). Never skip ticks, even unchanged.
@@ -361,20 +430,56 @@ def _pump_paced_frames(
     end_at = None if seconds <= 0 else t0 + seconds
     period = frame_period_s(mode.freq)
     next_tick = t0
-    last_log, last_sent, last_cap = t0, 0, counter.value
-    warned_dead = False
+    last_log, last_sent = t0, 0
+    stat_cap = capture.counter.value
+    progress_cap = stat_cap
+    last_progress = t0
     wall0, up0 = _read_clocks()
     while end_at is None or time.monotonic() < end_at:
         wall0, up0 = _raise_if_woke(wall0, up0)
-        warned_dead = _warn_if_capture_dead(proc, warned_dead)
-        send_frame(fl, bytes(raw_out))
+        now = time.monotonic()
+        alive, progress_cap, last_progress = _ensure_capture(
+            capture, progress_cap, last_progress, now
+        )
+        if not alive:
+            raise CaptureDeadError(
+                "captura nao se recuperou; saindo para o LaunchAgent religar o extend."
+            )
+        send_frame(fl, bytes(capture.buffer()))
         sent += 1
         now = time.monotonic()
-        last_log, last_sent, last_cap = _maybe_print_stats(
-            now, last_log, last_sent, last_cap, sent, counter, grab_ms, label, cursor, mode.freq
+        last_log, last_sent, stat_cap = _maybe_print_stats(
+            now,
+            last_log,
+            last_sent,
+            stat_cap,
+            sent,
+            capture.counter,
+            capture.grab_ms,
+            label,
+            cursor,
+            mode.freq,
         )
         next_tick = _sleep_until_tick(next_tick, period, now)
     return sent
+
+
+def _ensure_capture(
+    capture: CaptureProcess, last_cap: int, last_progress: float, now: float
+) -> tuple[bool, int, float]:
+    """Restart a dead or stalled capture child; False once the budget is spent."""
+    if capture.alive() and capture.counter.value != last_cap:
+        return True, capture.counter.value, now
+    if capture.alive() and now - last_progress < CAPTURE_STALL_S:
+        return True, last_cap, last_progress
+    if capture.alive():
+        print(f"  captura travada (sem frames há {now - last_progress:.0f}s).", flush=True)
+    else:
+        print(capture_worker_exit_message(capture.exitcode()), flush=True)
+    if not capture.restart():
+        print("  sem captura e sem tentativas de reinicio. Saindo para religar.", flush=True)
+        return False, last_cap, last_progress
+    return True, capture.counter.value, now
 
 
 def _raise_if_woke(wall_prev: float, up_prev: float) -> tuple[float, float]:
@@ -385,13 +490,6 @@ def _raise_if_woke(wall_prev: float, up_prev: float) -> tuple[float, float]:
             "saindo para o LaunchAgent religar (ou rode ./bin/extend)."
         )
     return wall, up
-
-
-def _warn_if_capture_dead(proc, already: bool) -> bool:
-    if already or proc is None or proc.is_alive():
-        return already
-    print(capture_worker_exit_message(proc.exitcode), flush=True)
-    return True
 
 
 def _maybe_print_stats(

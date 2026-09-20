@@ -6,6 +6,7 @@ import argparse
 
 from fl2000_re.fl2000_usb import FL2000, DongleNotFoundError
 from fl2000_re.letterbox import UNDERSCAN
+from fl2000_re.log_time import install_timestamped_streams
 from fl2000_re.probe import cmd_detect, cmd_dump, cmd_edid
 from fl2000_re.stream import cmd_bars, cmd_extend, cmd_mirror
 from fl2000_re.video_modes import NAMED_MODES, resolve_mode
@@ -77,6 +78,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main() -> int:
+    install_timestamped_streams()
     args = build_parser().parse_args()
     if args.cmd in {"install-agent", "uninstall-agent", "extend-agent"}:
         return _agent_cmd(args.cmd, args.now)

@@ -1,14 +1,57 @@
 """LaunchAgent install is local filesystem + launchctl stubs — no USB."""
 
+import subprocess
 from pathlib import Path
 
 from fl2000_re.launch_agent import (
     LABEL,
+    _bootstrap,
     render_plist,
     unmount_fake_cd,
     wait_for_dongle,
     write_launch_agent_plist,
 )
+
+
+def test_render_plist_silences_leaked_semaphore_warning():
+    xml = render_plist(
+        repo=Path("/repo"),
+        python=Path("/repo/.venv/bin/python"),
+        log=Path("/tmp/extend.log"),
+    )
+    assert "<key>PYTHONWARNINGS</key>" in xml
+    assert "ignore:resource_tracker:UserWarning" in xml
+
+
+def test_bootstrap_retries_after_io_error():
+    calls: list[list[str]] = []
+    state = {"bootstraps": 0}
+
+    def run(cmd: list[str], check: bool = False) -> None:
+        calls.append(cmd)
+        if cmd[1] == "bootstrap":
+            state["bootstraps"] += 1
+            if state["bootstraps"] == 1:
+                raise subprocess.CalledProcessError(5, cmd)
+
+    sleeps: list[float] = []
+    _bootstrap(Path("/tmp/x.plist"), run=run, sleep=sleeps.append)
+    assert calls[0][1] == "bootout"
+    assert state["bootstraps"] == 2
+    assert sleeps == [1.0]
+
+
+def test_bootstrap_raises_after_all_attempts_fail():
+    def run(cmd: list[str], check: bool = False) -> None:
+        if cmd[1] == "bootstrap":
+            raise subprocess.CalledProcessError(5, cmd)
+
+    try:
+        _bootstrap(Path("/tmp/x.plist"), run=run, sleep=lambda _s: None)
+    except subprocess.CalledProcessError as exc:
+        assert exc.returncode == 5
+    else:
+        raise AssertionError("expected CalledProcessError")
 
 
 def test_render_plist_is_aqua_keepalive_and_unbuffered():
