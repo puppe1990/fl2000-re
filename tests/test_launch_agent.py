@@ -119,8 +119,8 @@ def test_unmount_fake_cd_runs_diskutil(tmp_path: Path):
     assert seen == [["diskutil", "unmountDisk", str(vol)]]
 
 
-def test_cmd_extend_agent_disables_cursor(monkeypatch):
-    """Regression 2026-09-20: the NSCursor overlay hangs a launchd Aqua agent."""
+def test_cmd_extend_agent_shows_the_pointer(monkeypatch):
+    """2026-09-21: the sprite is drawn in-process, so launchd can show the cursor."""
     import fl2000_re.launch_agent as launch_agent
     import fl2000_re.stream as stream
     from fl2000_re import fl2000_usb
@@ -136,4 +136,4 @@ def test_cmd_extend_agent_disables_cursor(monkeypatch):
 
     monkeypatch.setattr(stream, "cmd_extend", fake_extend)
     assert cmd_extend_agent() == 0
-    assert seen["cursor"] is False
+    assert seen["cursor"] is True

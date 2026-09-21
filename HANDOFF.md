@@ -62,8 +62,10 @@ DisplayLink) ou o HDMI nativo do Mac (P2219H).
   `--place left|right`, `--out`, `--cursor` / `--no-cursor` (default ligado no extend).
 - Perfil do P2016: `--mode 640x480 --underscan 1.0 --stretch-x 1.1585` (mirror) e `stretch-x 1.0`
   (extend, 1:1). `bin/extend` encaminha extras (`./bin/extend --no-cursor`).
-- `extend`: tela virtual 640x480 em `x=-640`, 1:1, cursor via `mss` + blit NSCursor (~8 ms/frame,
-  ~35–40 fps de captura, USB 60). Letterbox 1:1 não passa de LANCZOS/unsharp. Log ao vivo a cada 1s
+- `extend`: tela virtual 640x480 em `x=-640`, 1:1, cursor via `mss` + blit de uma seta desenhada
+  in-process (~8 ms/frame, ~35–40 fps de captura, USB 60). O `NSCursor` (AppKit) pendura sob
+  launchd, então o sprite do ponteiro é gerado localmente (`cursor_overlay.builtin_arrow_sprite`).
+  Letterbox 1:1 não passa de LANCZOS/unsharp. Log ao vivo a cada 1s
   (`captura N fps / USB N fps / gargalo`).
 - Preview do processo USB usa `grab_via_screencapture` — nunca `mss` no pai.
 - Log com timestamp local (`log_time.py`, instalado no `cli.main`): sem ele não dava pra situar no
@@ -98,8 +100,9 @@ ponteiro mas custa ~134 ms/frame.
 
 ## Pendências / próximos passos
 
-1. **Cursor no `extend`**: resolvido. `-C -R` não desenha no virtual; blit NSCursor no `mss`
-   (usuário confirmou no HDMI). `--no-cursor` se quiser mais fps.
+1. **Cursor no `extend`**: resolvido, inclusive no LaunchAgent. `-C -R` não desenha no virtual; o
+   blit usa uma seta desenhada in-process (`cursor_overlay.builtin_arrow_sprite`) porque
+   `NSCursor`/AppKit pendura sob launchd. `--no-cursor` se quiser mais fps.
 2. **Tamanho de UI vs nitidez**: resolvido na prática — ficar no A. Não repetir B/C/stretch-x.
 3. **HPD/EDID**: sem HPD não dá pra negociar modos. Só resolve trocando o dongle/adaptador.
 4. Mirror de tela inteira continua borrado (downscale da retina) — inerente.
