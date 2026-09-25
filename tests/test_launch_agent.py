@@ -28,7 +28,7 @@ def test_bootstrap_retries_after_io_error():
     calls: list[list[str]] = []
     state = {"bootstraps": 0}
 
-    def run(cmd: list[str], check: bool = False) -> None:
+    def run(cmd: list[str], **_kwargs) -> None:
         calls.append(cmd)
         if cmd[1] == "bootstrap":
             state["bootstraps"] += 1
@@ -43,7 +43,7 @@ def test_bootstrap_retries_after_io_error():
 
 
 def test_bootstrap_raises_after_all_attempts_fail():
-    def run(cmd: list[str], check: bool = False) -> None:
+    def run(cmd: list[str], **_kwargs) -> None:
         if cmd[1] == "bootstrap":
             raise subprocess.CalledProcessError(5, cmd)
 

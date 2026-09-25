@@ -1,14 +1,19 @@
 """Virtual CG display helper protocol. Never creates a real WindowServer display."""
 
+import signal
 from pathlib import Path
 
 import pytest
+from fl2000_re import virtual_display
 from fl2000_re.video_modes import default_mirror_mode
 from fl2000_re.virtual_display import (
+    HELPER_REAP_WAIT_S,
     VirtualScreen,
     clang_virtual_display_command,
     default_virtual_desktop_size,
+    find_helper_pids,
     parse_virtual_ready_line,
+    reap_stale_helpers,
     spawn_virtual_display,
 )
 
@@ -87,7 +92,9 @@ def test_spawn_reads_ready_line_then_close_terminates(tmp_path: Path):
         assert timeout > 0
         return proc._line
 
-    handle = spawn_virtual_display(binary=binary, popen=popen, read_ready=read_ready)
+    handle = spawn_virtual_display(
+        binary=binary, popen=popen, read_ready=read_ready, reap=lambda _p: []
+    )
     assert handle.screen.display_id == 9
     assert handle.screen.origin_x == 100
     handle.close()
@@ -107,7 +114,7 @@ def test_spawn_includes_helper_stderr_when_process_dies(tmp_path: Path):
         raise RuntimeError(f"virtual display helper exited {got.poll()}: {got.stderr_text}")
 
     with pytest.raises(RuntimeError, match="CGVirtualDisplay API unavailable"):
-        spawn_virtual_display(binary=binary, popen=popen, read_ready=read_ready)
+        spawn_virtual_display(binary=binary, popen=popen, read_ready=read_ready, reap=lambda _p: [])
 
 
 def test_spawn_forwards_place_to_helper(tmp_path: Path):
@@ -124,8 +131,63 @@ def test_spawn_forwards_place_to_helper(tmp_path: Path):
     def read_ready(_got, _timeout: float) -> str:
         return proc._line
 
-    spawn_virtual_display(binary=binary, popen=popen, read_ready=read_ready, place="left")
+    spawn_virtual_display(
+        binary=binary, popen=popen, read_ready=read_ready, reap=lambda _p: [], place="left"
+    )
     assert captured[-2:] == ["--place", "left"]
+
+
+def test_reap_stale_helpers_sigterms_each_pid_and_waits():
+    """A helper orphaned by a killed parent keeps the display and blocks the next extend."""
+    killed: list[tuple[int, int]] = []
+    slept: list[float] = []
+    reaped = reap_stale_helpers(
+        Path("/x/hagibis_virtual_display"),
+        list_pids=lambda _target: [11, 22],
+        kill=lambda pid, sig: killed.append((pid, sig)),
+        sleep=slept.append,
+    )
+    assert reaped == [11, 22]
+    assert killed == [(11, signal.SIGTERM), (22, signal.SIGTERM)]
+    assert slept == [HELPER_REAP_WAIT_S]
+
+
+def test_reap_stale_helpers_skips_already_dead_pid():
+    def kill(_pid: int, _sig: int) -> None:
+        raise ProcessLookupError
+
+    reaped = reap_stale_helpers(
+        Path("/x/h"), list_pids=lambda _target: [7], kill=kill, sleep=lambda _s: None
+    )
+    assert reaped == []
+
+
+def test_find_helper_pids_parses_pgrep_tokens(monkeypatch: pytest.MonkeyPatch):
+    class _Done:
+        stdout = "123\n456\n"
+
+    monkeypatch.setattr(virtual_display.subprocess, "run", lambda *_a, **_k: _Done())
+    assert find_helper_pids(Path("/x/hagibis_virtual_display")) == [123, 456]
+
+
+def test_spawn_reaps_leftover_helper_for_its_binary(tmp_path: Path):
+    binary = tmp_path / "hagibis_virtual_display"
+    binary.write_text("#!/bin/sh\n")
+    binary.chmod(0o755)
+    proc = _FakeProc("HAGIBIS_VIRTUAL display_id=9 width=720 height=480 origin_x=0 origin_y=0\n")
+    seen: list[Path] = []
+
+    def reap(target: Path) -> list[int]:
+        seen.append(target)
+        return []
+
+    def read_ready(_got, _timeout: float) -> str:
+        return proc._line
+
+    spawn_virtual_display(
+        binary=binary, popen=lambda *_a, **_k: proc, read_ready=read_ready, reap=reap
+    )
+    assert seen == [binary]
 
 
 def test_spawn_rejects_unknown_place(tmp_path: Path):

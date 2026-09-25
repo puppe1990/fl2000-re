@@ -9,6 +9,7 @@
 
 #import <CoreGraphics/CoreGraphics.h>
 #import <Foundation/Foundation.h>
+#import <dispatch/dispatch.h>
 
 #include <signal.h>
 #include <stdio.h>
@@ -226,6 +227,24 @@ int main(int argc, char **argv) {
                (int)bounds.origin.x,
                (int)bounds.origin.y);
         fflush(stdout);
+
+        // The Python parent is the only owner of this display. If it dies without
+        // running its close() (Ctrl+C on the Terminal, window closed, SIGTERM from
+        // `launchctl bootout`) we get reparented to launchd and would linger,
+        // holding the display so the next extend cannot create it (the "liga de
+        // novo nao sobe" bug). Watch for the reparent and tear ourselves down.
+        pid_t parent_pid = getppid();
+        dispatch_source_t parent_watch = dispatch_source_create(
+            DISPATCH_SOURCE_TYPE_TIMER, 0, 0, dispatch_get_main_queue());
+        dispatch_source_set_timer(parent_watch, dispatch_time(DISPATCH_TIME_NOW, 500 * NSEC_PER_MSEC),
+                                  500 * NSEC_PER_MSEC, 100 * NSEC_PER_MSEC);
+        dispatch_source_set_event_handler(parent_watch, ^{
+            if (getppid() != parent_pid) {
+                fprintf(stderr, "parent process gone; removing virtual display\n");
+                exit(0);
+            }
+        });
+        dispatch_resume(parent_watch);
 
         signal(SIGINT, on_signal);
         signal(SIGTERM, on_signal);
