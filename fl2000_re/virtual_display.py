@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import os
 import select
+import signal
 import subprocess
 import time
 from collections.abc import Callable
@@ -25,6 +26,7 @@ VIRTUAL_DISPLAY_NAME = "Hagibis"
 PLACE_LEFT, PLACE_RIGHT = "left", "right"
 VALID_PLACES = (PLACE_LEFT, PLACE_RIGHT)
 READY_TIMEOUT_S = 8.0
+HELPER_REAP_WAIT_S = 0.3
 
 
 class HelperProc(Protocol):
@@ -40,6 +42,7 @@ class HelperProc(Protocol):
 
 PopenFn = Callable[..., HelperProc]
 ReadReadyFn = Callable[[HelperProc, float], str]
+ReapFn = Callable[[Path], list[int]]
 
 
 @dataclass(frozen=True)
@@ -134,6 +137,42 @@ def helper_binary_path() -> Path:
     return native_dir() / HELPER_NAME
 
 
+def find_helper_pids(target: Path) -> list[int]:
+    """PIDs still running the helper binary, by exact path (never pkill -f python).
+
+    Example: find_helper_pids(helper_binary_path()) -> []
+    """
+    completed = subprocess.run(
+        ["pgrep", "-f", str(target)], capture_output=True, text=True, check=False
+    )
+    return [int(token) for token in completed.stdout.split() if token.isdigit()]
+
+
+def reap_stale_helpers(
+    target: Path,
+    *,
+    list_pids: Callable[[Path], list[int]] = find_helper_pids,
+    kill: Callable[[int, int], None] = os.kill,
+    sleep: Callable[[float], None] = time.sleep,
+) -> list[int]:
+    """SIGTERM leftover helpers so a fresh extend can create the virtual display.
+
+    A helper built before the parent-watchdog (or one whose parent was SIGKILLed)
+    keeps the CG display reserved; the next extend then fails to create it. Kill
+    by exact PID and let the watchdog's replacement exit too.
+    """
+    reaped: list[int] = []
+    for pid in list_pids(target):
+        try:
+            kill(pid, signal.SIGTERM)
+        except ProcessLookupError:
+            continue
+        reaped.append(pid)
+    if reaped:
+        sleep(HELPER_REAP_WAIT_S)
+    return reaped
+
+
 def ensure_virtual_display_helper() -> Path:
     src = helper_source_path()
     dst = helper_binary_path()
@@ -159,6 +198,7 @@ def spawn_virtual_display(
     binary: Path | None = None,
     popen: PopenFn = subprocess.Popen,
     read_ready: ReadReadyFn | None = None,
+    reap: ReapFn = reap_stale_helpers,
     width: int | None = None,
     height: int | None = None,
     place: str = PLACE_RIGHT,
@@ -173,6 +213,7 @@ def spawn_virtual_display(
         raise FileNotFoundError(
             f"virtual display helper missing at {path}; run ./bin/setup on macOS"
         )
+    reap(path)
     argv = [
         str(path),
         "--width",

@@ -178,12 +178,16 @@ def _gui_target() -> str:
 
 
 def _bootstrap(plist: Path, run: RunFn, sleep: Callable[[float], None] = time.sleep) -> None:
-    """bootout + bootstrap; retry because an immediate re-bootstrap races with EIO (5)."""
+    """bootout + bootstrap; retry because an immediate re-bootstrap races with EIO (5).
+
+    launchctl prints "Bootstrap failed: 5: Input/output error" on the first attempt
+    of that race; capture it so a successful retry does not look like a failure.
+    """
     domain = f"gui/{os.getuid()}"
     run(["launchctl", "bootout", _gui_target()], check=False)
     for attempt in range(1, BOOTSTRAP_ATTEMPTS + 1):
         try:
-            run(["launchctl", "bootstrap", domain, str(plist)], check=True)
+            run(["launchctl", "bootstrap", domain, str(plist)], check=True, capture_output=True)
             return
         except subprocess.CalledProcessError:
             if attempt >= BOOTSTRAP_ATTEMPTS:
