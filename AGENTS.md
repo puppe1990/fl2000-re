@@ -48,6 +48,7 @@ fl2000_re/letterbox.py    aspect-preserving fit
 fl2000_re/probe.py        dump/detect/edid
 fl2000_re/hdmi.py         mode-set + bulk claim
 fl2000_re/stream.py       bars + paced clone + extend
+fl2000_re/frame_buffer.py shared frame buffer (memcpy in/out)
 fl2000_re/virtual_display.py  spawn CGVirtualDisplay helper
 fl2000_re/cli.py          argparse
 native/hagibis_virtual_display.m  WindowServer extra screen

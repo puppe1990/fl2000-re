@@ -30,6 +30,12 @@ Deixar a imagem no monitor ligado ao **Hagibis FL2000DX** (`1d5c:2000`) **nítid
 
 Outros achados:
 
+- **`buf[:n] = packed` custava 22 ms por frame** (2026-10-11). O array ctypes compartilhado não faz
+  slice assign rápido: percorre os 614400 elementos em Python e sozinho limitava o filho de captura
+  a ~24 fps. Trocado por `ctypes.memmove` (`fl2000_re/frame_buffer.py`, 0,014 ms). A/B no worker
+  real: 17,2 → 84,1 fps. No agent: 23-25 → 68-92 fps, USB 60, `gargalo: nenhum`. O filho passou de
+  2% para 23% de um core (produz ~85 fps para um USB de 60), e é isso que troca o teto antigo. O
+  grab+fit+pack do caminho real (extend 1:1) custa só ~7,7 ms; quem mandava era a cópia.
 - **Throughput real ~55 MB/s** (90 fps de frame de 614 KB), bem acima do budget de 42 MB/s assumido
   em `video_modes.py`.
 - **HPD = NAO sempre** — inclusive no HDMI direto do P2219H. O dongle provavelmente não fornece +5V
@@ -73,7 +79,7 @@ DisplayLink) ou o HDMI nativo do Mac (P2219H).
   (SIGKILL) ou trava (sem frames por 5s), mantendo o último frame no HDMI; esgotadas as 5 tentativas
   o pai sai (`CaptureDeadError`) pro LaunchAgent religar. Antes, um filho morto deixava o HDMI
   congelado pra sempre e gerava ~15 mil linhas de `captura 0.0 fps`.
-- 204 testes; `make check` = ruff + pytest + prettier; CI verde.
+- 224 testes; `make check` = ruff + pytest + prettier; CI verde.
 - PRs mergeados #10–#19. Desta sessão: #18 (ponteiro no HDMI via `-D -C`, depois substituído pelo
   blit) e #19 (mss+blit, flags, log, SIGSEGV).
 

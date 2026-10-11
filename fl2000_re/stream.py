@@ -18,6 +18,7 @@ from fl2000_re.capture import (
     grab_via_screencapture,
 )
 from fl2000_re.fl2000_usb import FL2000
+from fl2000_re.frame_buffer import new_shared_frame, write_shared_frame
 from fl2000_re.hdmi import bring_up_hdmi
 from fl2000_re.letterbox import UNDERSCAN
 from fl2000_re.pixels import dword_swap_frame, make_bars_rgb565, needs_zlp, pack_frame
@@ -135,7 +136,7 @@ def hdmi_capture_worker(
             grab_ms.value = (time.perf_counter() - t0) * 1000
         if len(packed) != n:
             continue
-        buf[:n] = packed
+        write_shared_frame(buf, packed)
         counter.value += 1
 
 
@@ -168,7 +169,7 @@ class CaptureProcess:
         self._cursor = cursor
         self._restarts_left = restarts_left
         self.n = len(frame)
-        self.shm = mp.Array("B", frame, lock=False)
+        self.shm = new_shared_frame(frame)
         self.counter = mp.Value("i", 1)
         self.grab_ms = mp.Value("d", 0.0)
         self.stop = mp.Event()
