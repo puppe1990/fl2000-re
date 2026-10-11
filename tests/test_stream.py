@@ -100,8 +100,10 @@ def test_frame_period_rejects_zero_freq():
         frame_period_s(0)
 
 
-def _run_worker_once(monkeypatch, width=64, height=48, bpp=2, underscan=1.0, stretch_x=1.0):
-    src = bytes([255, 0, 0]) * (width * height)
+def _run_worker_once(
+    monkeypatch, width=64, height=48, bpp=2, underscan=1.0, stretch_x=1.0, src: bytes | None = None
+):
+    src = bytes([255, 0, 0]) * (width * height) if src is None else src
     monkeypatch.setattr(stream, "grab_main_display_rgb", lambda: (src, width, height))
     n = width * height * bpp
     shm = mp.Array("B", n, lock=False)
@@ -126,6 +128,17 @@ def test_hdmi_capture_worker_packs_one_frame(monkeypatch):
     packed, count = _run_worker_once(monkeypatch)
     assert count >= 1
     assert any(packed)
+
+
+def test_hdmi_capture_worker_publishes_the_packed_frame_byte_for_byte(monkeypatch):
+    """What the child puts in shared memory is exactly what the pump sends to USB."""
+    from fl2000_re.pixels import pack_frame
+
+    width, height = 8, 4
+    src = bytes((i * 7) % 256 for i in range(width * height * 3))
+    packed, count = _run_worker_once(monkeypatch, width=width, height=height, src=src)
+    assert count >= 1
+    assert packed == pack_frame(src, 2)
 
 
 def test_hdmi_capture_worker_forwards_fill_params(monkeypatch):
