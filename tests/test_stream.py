@@ -9,7 +9,7 @@ import fl2000_re.stream as stream
 import pytest
 from fl2000_re.fl2000_usb import FL2000
 from fl2000_re.registers import BULK_EP
-from fl2000_re.stream import frame_period_s, send_frame
+from fl2000_re.stream import capture_period_s, frame_period_s, send_frame
 from fl2000_re.video_modes import MODE_640x480
 
 
@@ -100,8 +100,41 @@ def test_frame_period_rejects_zero_freq():
         frame_period_s(0)
 
 
+def test_capture_period_runs_ahead_of_the_pump_cadence():
+    """The child leads the pump so a tick never picks the frame it just sent."""
+    assert capture_period_s(60) == pytest.approx(frame_period_s(60) / stream.CAPTURE_LEAD)
+    assert capture_period_s(60) < frame_period_s(60)
+
+
+def test_capture_period_rejects_zero_freq():
+    with pytest.raises(ValueError, match="freq=0"):
+        capture_period_s(0)
+
+
+def test_capture_period_rejects_a_lead_below_one():
+    with pytest.raises(ValueError, match="lead=0.5"):
+        capture_period_s(60, lead=0.5)
+
+
+def test_sleep_until_tick_resyncs_after_a_slow_frame():
+    """A grab that overran the period must not leave a sleep debt behind."""
+    period = 0.01
+    started = time.monotonic()
+    resynced = stream._sleep_until_tick(0.0, period, now=5 * period)
+    assert resynced == pytest.approx(started, abs=0.05)
+    assert stream._sleep_until_tick(0.0, period, now=0.5 * period) == pytest.approx(period)
+
+
 def _run_worker_once(
-    monkeypatch, width=64, height=48, bpp=2, underscan=1.0, stretch_x=1.0, src: bytes | None = None
+    monkeypatch,
+    width=64,
+    height=48,
+    bpp=2,
+    underscan=1.0,
+    stretch_x=1.0,
+    src: bytes | None = None,
+    run_s: float = 0.0,
+    target_fps: int | None = None,
 ):
     src = bytes([255, 0, 0]) * (width * height) if src is None else src
     monkeypatch.setattr(stream, "grab_main_display_rgb", lambda: (src, width, height))
@@ -111,13 +144,30 @@ def _run_worker_once(
     stop = mp.Event()
     thread = threading.Thread(
         target=stream.hdmi_capture_worker,
-        args=(width, height, bpp, None, shm, n, counter, stop, underscan, stretch_x),
+        args=(
+            width,
+            height,
+            bpp,
+            None,
+            shm,
+            n,
+            counter,
+            stop,
+            underscan,
+            stretch_x,
+            True,
+            None,
+            target_fps,
+        ),
         daemon=True,
     )
     thread.start()
-    deadline = time.monotonic() + 3
-    while counter.value == 0 and time.monotonic() < deadline:
-        time.sleep(0.01)
+    if run_s > 0:
+        time.sleep(run_s)
+    else:
+        deadline = time.monotonic() + 3
+        while counter.value == 0 and time.monotonic() < deadline:
+            time.sleep(0.01)
     stop.set()
     thread.join(timeout=3)
     buf = shm.get_obj() if hasattr(shm, "get_obj") else shm
@@ -139,6 +189,14 @@ def test_hdmi_capture_worker_publishes_the_packed_frame_byte_for_byte(monkeypatc
     packed, count = _run_worker_once(monkeypatch, width=width, height=height, src=src)
     assert count >= 1
     assert packed == pack_frame(src, 2)
+
+
+def test_hdmi_capture_worker_paces_itself_to_the_target_fps(monkeypatch):
+    """Free-running the child burned 44% of a core on frames the 60 Hz pump discards."""
+    run_s, target_fps = 0.6, 20
+    _, count = _run_worker_once(monkeypatch, run_s=run_s, target_fps=target_fps)
+    assert count >= 2
+    assert count <= run_s * target_fps * stream.CAPTURE_LEAD + 4
 
 
 def test_hdmi_capture_worker_forwards_fill_params(monkeypatch):
@@ -179,6 +237,22 @@ def test_send_frame_skips_zlp_when_short():
     fl = FL2000(dev=FakeBulkDevice())
     send_frame(fl, bytes(100))
     assert fl.dev.packets == [bytes(100)]
+
+
+def test_capture_process_starts_the_child_paced_to_the_mode_refresh(monkeypatch):
+    """A free-running child grabs ~2x the frames the sink can show (2026-10-11)."""
+    seen: dict[str, object] = {}
+
+    class RecordingProcess(FakeProcess):
+        def __init__(self, **kwargs) -> None:
+            super().__init__(**kwargs)
+            seen["args"] = kwargs["args"]
+
+    monkeypatch.setattr(stream.mp, "Process", RecordingProcess)
+    capture = stream.CaptureProcess(bytes(512), MODE_640x480, None, 1.0, 1.0, False)
+    capture.start()
+    assert seen["args"][-1] == MODE_640x480.freq
+    capture.stop_and_join()
 
 
 def test_capture_worker_exit_message_explains_sigsegv():

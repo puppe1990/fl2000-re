@@ -27,6 +27,9 @@ from fl2000_re.video_modes import MODE_640x480, VideoMode, default_mirror_mode
 
 STATS_INTERVAL_S = 1.0
 TARGET_FPS = 60
+# The capture child leads the pump: a tick that lands on a frame the pump already
+# sent is a stutter, and a child paced exactly at the tick period aliases into it.
+CAPTURE_LEAD = 1.15
 WAKE_GAP_S = 3.0
 MAX_CAPTURE_RESTARTS = 5
 CAPTURE_STALL_S = 5.0
@@ -88,6 +91,21 @@ def frame_period_s(freq: int) -> float:
     return 1.0 / freq
 
 
+def capture_period_s(freq: int, lead: float = CAPTURE_LEAD) -> float:
+    """Capture cadence: the pump's period divided by lead, so no tick repeats a frame.
+
+    Free-running the child at ~125 fps cost 44% of a core grabbing frames the 60 Hz
+    pump discards; paced at 60x1.15 it costs 24% and still feeds every tick
+    (measured 2026-10-11). A slow grab is never delayed further: the worker skips
+    the sleep when it is already past the slot.
+
+    Example: capture_period_s(60) == pytest.approx(1 / 69)
+    """
+    if lead < 1:
+        raise ValueError(f"lead must be at least 1 (the pump's cadence), got lead={lead!r}")
+    return frame_period_s(freq) / lead
+
+
 def release_bulk(fl: FL2000) -> None:
     with contextlib.suppress(usb.core.USBError):
         usb.util.release_interface(fl.dev, 0)
@@ -116,16 +134,21 @@ def hdmi_capture_worker(
     stretch_x: float,
     include_cursor: bool = True,
     grab_ms=None,
+    target_fps: int | None = None,
 ) -> None:
     """Fill shm with a packed HDMI frame; never touches USB.
 
     display_id is a CGDirectDisplayID for extend, or None to clone the Air.
+    target_fps paces the loop to the sink's refresh; None runs flat out, which
+    only makes sense when nobody is waiting on a fixed cadence.
     """
     # Array(..., lock=False) has no get_obj() on some Python builds.
     buf = shm.get_obj() if hasattr(shm, "get_obj") else shm
     grab = (
         grab_main_display_rgb if display_id is None else _grab_display(display_id, include_cursor)
     )
+    period = capture_period_s(target_fps) if target_fps else 0.0
+    next_tick = time.perf_counter()
     while not stop.is_set():
         t0 = time.perf_counter()
         rgb = grab_letterboxed_rgb(
@@ -138,6 +161,8 @@ def hdmi_capture_worker(
             continue
         write_shared_frame(buf, packed)
         counter.value += 1
+        if period:
+            next_tick = _sleep_until_tick(next_tick, period, time.perf_counter())
 
 
 def _grab_display(display_id: int, include_cursor: bool = True) -> Grabber:
@@ -195,6 +220,7 @@ class CaptureProcess:
             self._stretch_x,
             self._cursor,
             self.grab_ms,
+            self._mode.freq,
         )
 
     def alive(self) -> bool:
