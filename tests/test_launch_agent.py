@@ -127,13 +127,38 @@ def test_cmd_extend_agent_shows_the_pointer(monkeypatch):
 
     monkeypatch.setattr(launch_agent, "wait_for_dongle", lambda *_a, **_k: True)
     monkeypatch.setattr(launch_agent, "unmount_fake_cd", lambda *_a, **_k: None)
+    monkeypatch.setattr(launch_agent, "rotate_extend_log", lambda *_a, **_k: None)
     monkeypatch.setattr(fl2000_usb, "FL2000", lambda *_a, **_k: object())
     seen: dict[str, object] = {}
 
-    def fake_extend(_fl, _seconds, _underscan, _stretch_x, _mode, _v_shift, _place, cursor):
+    def fake_extend(
+        _fl, _seconds, _underscan, _stretch_x, _mode, _v_shift, _place, cursor, **kwargs
+    ):
         seen["cursor"] = cursor
+        seen["capture_fps"] = kwargs.get("capture_fps")
         return 0
 
     monkeypatch.setattr(stream, "cmd_extend", fake_extend)
     assert cmd_extend_agent() == 0
     assert seen["cursor"] is True
+    assert seen["capture_fps"] == stream.EXTEND_CAPTURE_FPS
+
+
+def test_rotate_extend_log_leaves_a_small_file(tmp_path: Path):
+    from fl2000_re.launch_agent import rotate_extend_log
+
+    path = tmp_path / "fl2000-re-extend.log"
+    path.write_text("ok\n")
+    rotate_extend_log(path, max_bytes=100)
+    assert path.read_text() == "ok\n"
+    assert not path.with_name("fl2000-re-extend.log.old").exists()
+
+
+def test_rotate_extend_log_moves_a_huge_file_aside(tmp_path: Path):
+    from fl2000_re.launch_agent import rotate_extend_log
+
+    path = tmp_path / "fl2000-re-extend.log"
+    path.write_bytes(b"x" * 200)
+    rotate_extend_log(path, max_bytes=100)
+    assert not path.exists()
+    assert path.with_name("fl2000-re-extend.log.old").read_bytes() == b"x" * 200

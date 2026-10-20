@@ -21,6 +21,7 @@ LABEL = "com.fl2000-re.extend"
 POLL_S = 2.0
 BOOTSTRAP_ATTEMPTS = 3
 BOOTSTRAP_RETRY_S = 1.0
+LOG_MAX_BYTES = 2 * 1024 * 1024
 RunFn = Callable[..., Any]
 FindDevice = Callable[..., Any]
 
@@ -156,6 +157,18 @@ def cmd_uninstall_agent(run: RunFn = subprocess.run) -> int:
     return 0
 
 
+def rotate_extend_log(path: Path, max_bytes: int = LOG_MAX_BYTES) -> None:
+    """Keep the LaunchAgent log from filling the last gigabytes of the boot volume.
+
+    Example: rotate_extend_log(Path.home() / "Library" / "Logs" / "fl2000-re-extend.log")
+    """
+    if not path.is_file() or path.stat().st_size <= max_bytes:
+        return
+    bak = path.with_name(path.name + ".old")
+    bak.unlink(missing_ok=True)
+    path.replace(bak)
+
+
 def cmd_extend_agent() -> int:
     """Wait for the dongle, drop the fake CD, then extend (LaunchAgent entry).
 
@@ -164,13 +177,17 @@ def cmd_extend_agent() -> int:
     forever in a launchd Aqua agent with no run loop (2026-09-20), which is why
     this entry ran with the cursor off.
     """
+    log = Path.home() / "Library" / "Logs" / "fl2000-re-extend.log"
+    rotate_extend_log(log)
     print("aguardando o Hagibis USB (1d5c:2000)...")
     wait_for_dongle()
     unmount_fake_cd()
     from fl2000_re.fl2000_usb import FL2000
-    from fl2000_re.stream import cmd_extend
+    from fl2000_re.stream import EXTEND_CAPTURE_FPS, cmd_extend
 
-    return cmd_extend(FL2000(), 0, 1.0, 1.0, MODE_640x480, 0, "left", True)
+    return cmd_extend(
+        FL2000(), 0, 1.0, 1.0, MODE_640x480, 0, "left", True, capture_fps=EXTEND_CAPTURE_FPS
+    )
 
 
 def _gui_target() -> str:

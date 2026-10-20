@@ -111,6 +111,18 @@ def test_cli_help_lists_no_cursor():
     assert "--no-cursor" in help_text
 
 
+def test_cli_capture_fps_defaults_to_extend_profile():
+    from fl2000_re.stream import EXTEND_CAPTURE_FPS
+
+    ns = build_parser().parse_args(["extend"])
+    assert ns.capture_fps == EXTEND_CAPTURE_FPS
+
+
+def test_cli_capture_fps_accepts_override():
+    ns = build_parser().parse_args(["extend", "--capture-fps", "30"])
+    assert ns.capture_fps == 30
+
+
 def test_cli_main_forwards_no_cursor(monkeypatch):
     import sys
 

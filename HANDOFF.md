@@ -73,17 +73,23 @@ DisplayLink) ou o HDMI nativo do Mac (P2219H).
 - Perfil do P2016: `--mode 640x480 --underscan 1.0 --stretch-x 1.1585` (mirror) e `stretch-x 1.0`
   (extend, 1:1). `bin/extend` encaminha extras (`./bin/extend --no-cursor`).
 - `extend`: tela virtual 640x480 em `x=-640`, 1:1, cursor via `mss` + blit de uma seta desenhada
-  in-process (~8 ms/frame, ~35–40 fps de captura, USB 60). O `NSCursor` (AppKit) pendura sob
-  launchd, então o sprite do ponteiro é gerado localmente (`cursor_overlay.builtin_arrow_sprite`).
-  Letterbox 1:1 não passa de LANCZOS/unsharp. Log ao vivo a cada 1s
-  (`captura N fps / USB N fps / gargalo`).
+  in-process (~8 ms/frame). USB continua 60 Hz (reenvia o último frame). Captura default
+  `EXTEND_CAPTURE_FPS = 20` (`--capture-fps`) — 69 fps via `CGWindowListCreateImage` pinava o
+  WindowServer no Air de 8 GB (2026-10-20: grab 636–2735 ms, quatro `btn_rst`). Ponteiro **na tela
+  Hagibis** sobe a `FLUID_CAPTURE_FPS = 60` com `lead=1` (1/60 s; o lead 1.15 dava ~69/s). Nas
+  outras telas fica 20. Ponteiro parado 10 s cai a `IDLE_CAPTURE_FPS = 5` (USB ainda 60); o primeiro
+  movimento na Hagibis volta a 60, nas outras a 20. Grab ≥80 ms dispara `capture_backoff_s` (cap 2
+  s) para não martelar o compositor. O `NSCursor` (AppKit) pendura sob launchd, então o sprite do
+  ponteiro é gerado localmente (`cursor_overlay.builtin_arrow_sprite`). Letterbox 1:1 não passa de
+  LANCZOS/unsharp. Log ao vivo a cada 1s (`captura N fps / USB N fps / gargalo`); o LaunchAgent
+  rotaciona o log se passar de 2 MB (o arquivo chegou a 260 MB, 1 linha/s desde 20/09).
 - Preview do processo USB usa `grab_via_screencapture` — nunca `mss` no pai.
 - Log com timestamp local (`log_time.py`, instalado no `cli.main`): sem ele não dava pra situar no
   tempo o incidente de 2026-09-20. `CaptureProcess` respawna o filho de captura quando ele morre
   (SIGKILL) ou trava (sem frames por 5s), mantendo o último frame no HDMI; esgotadas as 5 tentativas
   o pai sai (`CaptureDeadError`) pro LaunchAgent religar. Antes, um filho morto deixava o HDMI
   congelado pra sempre e gerava ~15 mil linhas de `captura 0.0 fps`.
-- 230 testes; `make check` = ruff + pytest + prettier; CI verde.
+- 254 testes; `make check` = ruff + pytest + prettier; CI verde.
 - PRs mergeados #10–#19. Desta sessão: #18 (ponteiro no HDMI via `-D -C`, depois substituído pelo
   blit) e #19 (mss+blit, flags, log, SIGSEGV).
 
@@ -116,6 +122,9 @@ ponteiro mas custa ~134 ms/frame.
 2. **Tamanho de UI vs nitidez**: resolvido na prática — ficar no A. Não repetir B/C/stretch-x.
 3. **HPD/EDID**: sem HPD não dá pra negociar modos. Só resolve trocando o dongle/adaptador.
 4. Mirror de tela inteira continua borrado (downscale da retina) — inerente.
+5. **Freeze 2026-10-20**: captura 20 no resto, 60 fluido só com o ponteiro na Hagibis (`lead=1`), 5
+   fps após 10 s parado, backoff no grab lento. Recarregar o LaunchAgent para valer
+   (`launchctl kickstart -k gui/$UID/com.fl2000-re.extend`). Sem commit até o usuário pedir.
 
 ## Gotchas operacionais
 
