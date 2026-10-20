@@ -8,7 +8,7 @@ from fl2000_re.fl2000_usb import FL2000, DongleNotFoundError
 from fl2000_re.letterbox import UNDERSCAN
 from fl2000_re.log_time import install_timestamped_streams
 from fl2000_re.probe import cmd_detect, cmd_dump, cmd_edid
-from fl2000_re.stream import cmd_bars, cmd_extend, cmd_mirror
+from fl2000_re.stream import EXTEND_CAPTURE_FPS, cmd_bars, cmd_extend, cmd_mirror
 from fl2000_re.video_modes import NAMED_MODES, resolve_mode
 
 
@@ -68,6 +68,12 @@ def build_parser() -> argparse.ArgumentParser:
         default=True,
         help="ponteiro no HDMI (desligue com --no-cursor para mais fps)",
     )
+    ap.add_argument(
+        "--capture-fps",
+        type=int,
+        default=EXTEND_CAPTURE_FPS,
+        help="fps da captura no extend (USB continua 60; 20 alivia o WindowServer)",
+    )
     ap.add_argument("--out", default=None, help="arquivo .jsonl do monitor-log")
     ap.add_argument(
         "--now",
@@ -103,6 +109,7 @@ def main() -> int:
             args.v_shift,
             args.place,
             args.cursor,
+            args.capture_fps,
         )
     if args.cmd == "monitor-log":
         from fl2000_re.status_log import cmd_monitor_log

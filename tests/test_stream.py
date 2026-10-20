@@ -116,12 +116,191 @@ def test_capture_period_rejects_a_lead_below_one():
         capture_period_s(60, lead=0.5)
 
 
+def test_capture_backoff_skips_a_healthy_grab():
+    """~8-15 ms mss grab on 640x480 must not add sleep on top of the cadence."""
+    from fl2000_re.stream import capture_backoff_s
+
+    assert capture_backoff_s(0.010) == 0.0
+    assert capture_backoff_s(0.079) == 0.0
+
+
+def test_capture_backoff_pauses_after_a_wedged_windowserver_grab():
+    """2026-10-20: grab 636-2735 ms then another grab immediately preceded btn_rst."""
+    from fl2000_re.stream import capture_backoff_s
+
+    assert capture_backoff_s(0.636) == pytest.approx(0.636)
+    assert capture_backoff_s(2.735) == pytest.approx(2.0)
+
+
+def test_capture_fps_stays_active_while_the_pointer_is_moving():
+    from fl2000_re.stream import EXTEND_CAPTURE_FPS, capture_fps_for_idle
+
+    assert capture_fps_for_idle(0.0) == EXTEND_CAPTURE_FPS
+    assert capture_fps_for_idle(9.9) == EXTEND_CAPTURE_FPS
+
+
+def test_capture_fps_drops_after_the_pointer_parks_for_ten_seconds():
+    from fl2000_re.stream import IDLE_CAPTURE_FPS, capture_fps_for_idle
+
+    assert capture_fps_for_idle(10.0) == IDLE_CAPTURE_FPS
+    assert capture_fps_for_idle(30.0) == IDLE_CAPTURE_FPS
+    assert IDLE_CAPTURE_FPS == 5
+
+
+def test_capture_fps_goes_fluid_when_the_pointer_is_on_the_hagibis():
+    from fl2000_re.stream import FLUID_CAPTURE_FPS, capture_fps_for_idle
+
+    assert capture_fps_for_idle(0.0, on_display=True) == FLUID_CAPTURE_FPS
+    assert capture_fps_for_idle(9.9, on_display=True) == FLUID_CAPTURE_FPS
+    assert capture_fps_for_idle(10.0, on_display=True) == 5
+    assert FLUID_CAPTURE_FPS == 60
+
+
+def test_pointer_on_display_is_true_inside_hagibis_bounds():
+    from fl2000_re.stream import pointer_on_display
+
+    assert pointer_on_display((-320.0, 240.0), (-640, 0, 640, 480)) is True
+
+
+def test_pointer_on_display_is_false_outside_hagibis_bounds():
+    from fl2000_re.stream import pointer_on_display
+
+    assert pointer_on_display((100.0, 80.0), (-640, 0, 640, 480)) is False
+
+
+def test_pointer_on_display_is_false_without_bounds():
+    """Unknown/mirror bounds must stay at rest fps — 60 Hz grab of the Air freezes it."""
+    from fl2000_re.stream import pointer_on_display
+
+    assert pointer_on_display((10.0, 10.0), None) is False
+
+
+def test_pointer_capture_period_is_one_sixtieth_when_fluid():
+    from fl2000_re.stream import pointer_capture_period
+
+    assert pointer_capture_period(60) == pytest.approx(1 / 60)
+    assert pointer_capture_period(60) == pytest.approx(capture_period_s(60, lead=1.0))
+
+
+def test_pointer_capture_period_keeps_lead_at_rest():
+    from fl2000_re.stream import pointer_capture_period
+
+    assert pointer_capture_period(20) == pytest.approx(capture_period_s(20))
+    assert pointer_capture_period(5) == pytest.approx(capture_period_s(5))
+
+
+def test_retune_pointer_period_keeps_cadence_when_mouse_is_unknown():
+    from fl2000_re.stream import capture_period_s, retune_pointer_period
+
+    period = capture_period_s(20)
+    mouse_at, moved_at, new_period, next_tick = retune_pointer_period(
+        active_fps=20,
+        mouse_at=(10, 20),
+        moved_at=0.0,
+        period=period,
+        next_tick=9.0,
+        now=12.0,
+        mouse_xy=None,
+    )
+    assert mouse_at == (10, 20)
+    assert moved_at == 0.0
+    assert new_period == period
+    assert next_tick == 9.0
+
+
+def test_retune_pointer_period_snaps_back_the_moment_the_mouse_moves():
+    from fl2000_re.stream import capture_period_s, retune_pointer_period
+
+    idle_period = capture_period_s(5)
+    mouse_at, moved_at, period, next_tick = retune_pointer_period(
+        active_fps=20,
+        mouse_at=(10, 20),
+        moved_at=0.0,
+        period=idle_period,
+        next_tick=100.0,
+        now=12.0,
+        mouse_xy=(40.0, 20.0),
+        display_bounds=(0, 0, 640, 480),
+    )
+    assert mouse_at == (40, 20)
+    assert moved_at == 12.0
+    assert period == pytest.approx(capture_period_s(60, lead=1.0))
+    assert next_tick == pytest.approx(12.0)
+
+
+def test_retune_pointer_period_stays_at_rest_when_mouse_is_on_another_display():
+    from fl2000_re.stream import capture_period_s, retune_pointer_period
+
+    idle_period = capture_period_s(5)
+    _mouse_at, _moved_at, period, next_tick = retune_pointer_period(
+        active_fps=20,
+        mouse_at=(-100, 20),
+        moved_at=0.0,
+        period=idle_period,
+        next_tick=100.0,
+        now=12.0,
+        mouse_xy=(100.0, 80.0),
+        display_bounds=(-640, 0, 640, 480),
+    )
+    assert period == pytest.approx(capture_period_s(20))
+    assert next_tick == pytest.approx(12.0)
+
+
+def test_retune_pointer_period_stays_at_rest_without_display_bounds():
+    from fl2000_re.stream import capture_period_s, retune_pointer_period
+
+    idle_period = capture_period_s(5)
+    _mouse_at, _moved_at, period, next_tick = retune_pointer_period(
+        active_fps=20,
+        mouse_at=(10, 20),
+        moved_at=0.0,
+        period=idle_period,
+        next_tick=100.0,
+        now=12.0,
+        mouse_xy=(40.0, 20.0),
+    )
+    assert period == pytest.approx(capture_period_s(20))
+    assert next_tick == pytest.approx(12.0)
+
+
+def test_retune_pointer_period_widens_after_ten_seconds_still():
+    from fl2000_re.stream import capture_period_s, retune_pointer_period
+
+    active_period = capture_period_s(20)
+    mouse_at, moved_at, period, next_tick = retune_pointer_period(
+        active_fps=20,
+        mouse_at=(10, 20),
+        moved_at=0.0,
+        period=active_period,
+        next_tick=9.0,
+        now=10.0,
+        mouse_xy=(10.2, 20.4),
+    )
+    assert mouse_at == (10, 20)
+    assert moved_at == 0.0
+    assert period == pytest.approx(capture_period_s(5))
+    assert next_tick == pytest.approx(9.0)
+
+
+def test_retune_from_live_pointer_snaps_back_when_coregraphics_moves(monkeypatch):
+    monkeypatch.setattr("fl2000_re.cursor_overlay.mouse_global_xy", lambda: (40.0, 20.0))
+    mouse_at, moved_at, period, next_tick = stream._retune_from_live_pointer(
+        20, (10, 20), 0.0, 0.2, 100.0, display_bounds=(0, 0, 640, 480)
+    )
+    assert mouse_at == (40, 20)
+    assert period == pytest.approx(stream.capture_period_s(60, lead=1.0))
+    assert next_tick == pytest.approx(moved_at)
+
+
 def test_sleep_until_tick_resyncs_after_a_slow_frame():
-    """A grab that overran the period must not leave a sleep debt behind."""
+    """A grab that overran the period must not leave a sleep debt behind.
+
+    Resync to the same `now` clock — mixing perf_counter with monotonic slept
+    the capture child for minutes when idle stopped resetting next_tick.
+    """
     period = 0.01
-    started = time.monotonic()
     resynced = stream._sleep_until_tick(0.0, period, now=5 * period)
-    assert resynced == pytest.approx(started, abs=0.05)
+    assert resynced == pytest.approx(5 * period)
     assert stream._sleep_until_tick(0.0, period, now=0.5 * period) == pytest.approx(period)
 
 
@@ -138,6 +317,7 @@ def _run_worker_once(
 ):
     src = bytes([255, 0, 0]) * (width * height) if src is None else src
     monkeypatch.setattr(stream, "grab_main_display_rgb", lambda: (src, width, height))
+    monkeypatch.setattr("fl2000_re.cursor_overlay.mouse_global_xy", lambda: (0.0, 0.0))
     n = width * height * bpp
     shm = mp.Array("B", n, lock=False)
     counter = mp.Value("i", 0)
@@ -240,7 +420,7 @@ def test_send_frame_skips_zlp_when_short():
 
 
 def test_capture_process_starts_the_child_paced_to_the_mode_refresh(monkeypatch):
-    """A free-running child grabs ~2x the frames the sink can show (2026-10-11)."""
+    """Mirror still tracks the sink. Extend passes a lower capture_fps."""
     seen: dict[str, object] = {}
 
     class RecordingProcess(FakeProcess):
@@ -251,7 +431,26 @@ def test_capture_process_starts_the_child_paced_to_the_mode_refresh(monkeypatch)
     monkeypatch.setattr(stream.mp, "Process", RecordingProcess)
     capture = stream.CaptureProcess(bytes(512), MODE_640x480, None, 1.0, 1.0, False)
     capture.start()
-    assert seen["args"][-1] == MODE_640x480.freq
+    assert seen["args"][-2] == MODE_640x480.freq
+    capture.stop_and_join()
+
+
+def test_capture_process_can_pace_below_the_usb_refresh(monkeypatch):
+    """USB resends the last frame at 60 Hz; grabbing 69 fps is what wedged WindowServer."""
+    seen: dict[str, object] = {}
+
+    class RecordingProcess(FakeProcess):
+        def __init__(self, **kwargs) -> None:
+            super().__init__(**kwargs)
+            seen["args"] = kwargs["args"]
+
+    monkeypatch.setattr(stream.mp, "Process", RecordingProcess)
+    capture = stream.CaptureProcess(
+        bytes(512), MODE_640x480, None, 1.0, 1.0, False, capture_fps=stream.EXTEND_CAPTURE_FPS
+    )
+    capture.start()
+    assert seen["args"][-2] == stream.EXTEND_CAPTURE_FPS
+    assert stream.EXTEND_CAPTURE_FPS == 20
     capture.stop_and_join()
 
 
@@ -470,6 +669,47 @@ def test_format_stream_stats_quiet_when_on_target():
     assert "(mss " in line
 
 
+def test_format_stream_stats_quiet_when_capture_hits_its_own_target():
+    """20 fps capture vs 60 Hz USB is the intended extend profile, not a capture stall."""
+    from fl2000_re.stream import format_stream_stats
+
+    line = format_stream_stats(
+        label="estendendo",
+        capture_fps=19.0,
+        usb_fps=60.0,
+        grab_ms=8.0,
+        cursor=True,
+        target_fps=60,
+        capture_target_fps=20,
+    )
+    assert "gargalo: nenhum" in line
+    assert "--no-cursor" not in line
+
+
+def test_capture_parked_reads_the_shared_idle_flag():
+    assert (
+        stream._capture_parked(types.SimpleNamespace(idle=types.SimpleNamespace(value=1))) is True
+    )
+    assert stream._capture_parked(object()) is False
+
+
+def test_format_stream_stats_names_parked_pointer_not_a_stall():
+    from fl2000_re.stream import format_stream_stats
+
+    line = format_stream_stats(
+        label="estendendo",
+        capture_fps=5.0,
+        usb_fps=60.0,
+        grab_ms=10.0,
+        cursor=True,
+        target_fps=60,
+        capture_target_fps=20,
+        parked=True,
+    )
+    assert "ponteiro parado" in line
+    assert "gargalo: captura" not in line
+
+
 def test_hdmi_capture_worker_honors_no_cursor(monkeypatch):
     seen: dict[str, object] = {}
 
@@ -562,6 +802,7 @@ def _stub_extend_preview(monkeypatch, tmp_path):
     def fake_pace(_fl, _frame, _mode, display_id, _seconds, **kwargs):
         seen["pace_display"] = display_id
         seen["pace_cursor"] = kwargs.get("cursor")
+        seen["pace_capture_fps"] = kwargs.get("capture_fps")
         return 0
 
     def fake_bring_up(*_a, **_k):
@@ -595,6 +836,7 @@ def test_cmd_extend_defaults_cursor_on_into_pace(monkeypatch, tmp_path):
     fl = FL2000(dev=FakeBulkDevice())
     assert stream.cmd_extend(fl, 0.01, underscan=1.0, mode=MODE_640x480) == 0
     assert seen["pace_cursor"] is True
+    assert seen["pace_capture_fps"] == stream.EXTEND_CAPTURE_FPS
 
 
 def test_cmd_mirror_preview_never_calls_mss(monkeypatch, tmp_path):

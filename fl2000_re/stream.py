@@ -27,6 +27,15 @@ from fl2000_re.video_modes import MODE_640x480, VideoMode, default_mirror_mode
 
 STATS_INTERVAL_S = 1.0
 TARGET_FPS = 60
+# USB still pumps 60 Hz by resending the last frame. Grabbing ~69 fps via
+# CGWindowListCreateImage is what pinned WindowServer on the 8 GB Air
+# (2026-10-20: grab 636-2735 ms, then four btn_rst freezes).
+EXTEND_CAPTURE_FPS = 20
+FLUID_CAPTURE_FPS = 60
+IDLE_CAPTURE_FPS = 5
+MOUSE_IDLE_S = 10.0
+HEAVY_GRAB_S = 0.080
+MAX_BACKOFF_S = 2.0
 # The capture child leads the pump: a tick that lands on a frame the pump already
 # sent is a stutter, and a child paced exactly at the tick period aliases into it.
 CAPTURE_LEAD = 1.15
@@ -91,6 +100,95 @@ def frame_period_s(freq: int) -> float:
     return 1.0 / freq
 
 
+def capture_fps_for_idle(
+    idle_s: float,
+    active_fps: int = EXTEND_CAPTURE_FPS,
+    idle_fps: int = IDLE_CAPTURE_FPS,
+    idle_after_s: float = MOUSE_IDLE_S,
+    on_display: bool = False,
+    fluid_fps: int = FLUID_CAPTURE_FPS,
+) -> int:
+    """Fluid while the pointer is on the Hagibis; 5 fps after 10s still.
+
+    USB still resends the last frame at 60 Hz. Moving on that display snaps
+    to 60 fps with lead=1 so we do not grab 69/s.
+
+    Example: capture_fps_for_idle(0.0, on_display=True) == 60
+    """
+    if idle_s >= idle_after_s:
+        return min(active_fps, idle_fps)
+    if on_display:
+        return fluid_fps
+    return active_fps
+
+
+def pointer_on_display(xy: tuple[float, float], bounds: tuple[int, int, int, int] | None) -> bool:
+    """True when the pointer is on the virtual Hagibis desktop.
+
+    bounds=None means unknown or mirror: stay at rest fps so a 60 Hz grab of
+    the Air does not freeze WindowServer.
+
+    Example: pointer_on_display((-320.0, 240.0), (-640, 0, 640, 480)) is True
+    """
+    if bounds is None:
+        return False
+    from fl2000_re.cursor_overlay import cursor_local_xy
+
+    return cursor_local_xy(xy[0], xy[1], bounds[0], bounds[1], bounds[2], bounds[3]) is not None
+
+
+def pointer_capture_period(fps: int) -> float:
+    """60 fps fluid uses lead=1; rest/idle keep the 1.15 lead."""
+    if fps >= FLUID_CAPTURE_FPS:
+        return capture_period_s(fps, lead=1.0)
+    return capture_period_s(fps)
+
+
+def snapped_pointer(xy: tuple[float, float]) -> tuple[int, int]:
+    """Integer pointer cell; sub-pixel CG jitter must not reset the idle timer."""
+    return (int(round(xy[0])), int(round(xy[1])))
+
+
+def retune_pointer_period(
+    active_fps: int,
+    mouse_at: tuple[int, int] | None,
+    moved_at: float,
+    period: float,
+    next_tick: float,
+    now: float,
+    mouse_xy: tuple[float, float] | None,
+    display_bounds: tuple[int, int, int, int] | None = None,
+) -> tuple[tuple[int, int] | None, float, float, float]:
+    """60 fps while the pointer moves on the Hagibis; 5 fps after 10s still.
+
+    Example: retune_pointer_period(20, (10, 20), 0.0, 0.2, 100.0, 12.0, (40.0, 20.0), (0, 0, 640, 480))
+    """
+    if mouse_xy is None:
+        return mouse_at, moved_at, period, next_tick
+    snapped = snapped_pointer(mouse_xy)
+    on_display = pointer_on_display(mouse_xy, display_bounds)
+    if mouse_at is None or snapped != mouse_at:
+        fps = capture_fps_for_idle(0.0, active_fps=active_fps, on_display=on_display)
+        return snapped, now, pointer_capture_period(fps), now
+    fps = capture_fps_for_idle(now - moved_at, active_fps=active_fps, on_display=on_display)
+    return mouse_at, moved_at, pointer_capture_period(fps), next_tick
+
+
+def capture_backoff_s(
+    grab_s: float, heavy_s: float = HEAVY_GRAB_S, max_s: float = MAX_BACKOFF_S
+) -> float:
+    """Extra sleep after a slow CG grab so a dying WindowServer is not polled at 60 Hz.
+
+    A healthy 640x480 mss grab is ~8-15 ms. At 636-2735 ms the compositor is
+    already wedged; grabbing again immediately preceded the 2026-10-20 freezes.
+
+    Example: capture_backoff_s(2.735) == 2.0
+    """
+    if grab_s < heavy_s:
+        return 0.0
+    return min(max_s, grab_s)
+
+
 def capture_period_s(freq: int, lead: float = CAPTURE_LEAD) -> float:
     """Capture cadence: the pump's period divided by lead, so no tick repeats a frame.
 
@@ -135,6 +233,7 @@ def hdmi_capture_worker(
     include_cursor: bool = True,
     grab_ms=None,
     target_fps: int | None = None,
+    idle_flag=None,
 ) -> None:
     """Fill shm with a packed HDMI frame; never touches USB.
 
@@ -148,21 +247,74 @@ def hdmi_capture_worker(
         grab_main_display_rgb if display_id is None else _grab_display(display_id, include_cursor)
     )
     period = capture_period_s(target_fps) if target_fps else 0.0
-    next_tick = time.perf_counter()
+    next_tick = time.monotonic()
+    mouse_at: tuple[int, int] | None = None
+    moved_at = next_tick
+    bounds = _virtual_display_bounds(display_id)
     while not stop.is_set():
+        if target_fps:
+            if display_id is not None and bounds is None:
+                bounds = _virtual_display_bounds(display_id)
+            mouse_at, moved_at, period, next_tick = _retune_from_live_pointer(
+                target_fps, mouse_at, moved_at, period, next_tick, display_bounds=bounds
+            )
+            if idle_flag is not None:
+                idle_flag.value = int(period >= pointer_capture_period(IDLE_CAPTURE_FPS) - 1e-9)
         t0 = time.perf_counter()
         rgb = grab_letterboxed_rgb(
             width, height, grab=grab, underscan=underscan, stretch_x=stretch_x
         )
         packed = pack_frame(rgb, bpp)
+        grab_s = time.perf_counter() - t0
         if grab_ms is not None:
-            grab_ms.value = (time.perf_counter() - t0) * 1000
+            grab_ms.value = grab_s * 1000
         if len(packed) != n:
             continue
         write_shared_frame(buf, packed)
         counter.value += 1
-        if period:
-            next_tick = _sleep_until_tick(next_tick, period, time.perf_counter())
+        extra = capture_backoff_s(grab_s)
+        if extra:
+            time.sleep(extra)
+            next_tick = time.monotonic()
+        elif period:
+            next_tick = _sleep_until_tick(next_tick, period, time.monotonic())
+
+
+def _retune_from_live_pointer(
+    active_fps: int,
+    mouse_at: tuple[int, int] | None,
+    moved_at: float,
+    period: float,
+    next_tick: float,
+    display_bounds: tuple[int, int, int, int] | None = None,
+) -> tuple[tuple[int, int] | None, float, float, float]:
+    from fl2000_re import cursor_overlay
+
+    try:
+        xy = cursor_overlay.mouse_global_xy()
+    except Exception:
+        xy = None
+    return retune_pointer_period(
+        active_fps,
+        mouse_at,
+        moved_at,
+        period,
+        next_tick,
+        time.monotonic(),
+        xy,
+        display_bounds,
+    )
+
+
+def _virtual_display_bounds(display_id: int | None) -> tuple[int, int, int, int] | None:
+    if display_id is None:
+        return None
+    from fl2000_re.capture import cg_display_bounds
+
+    try:
+        return cg_display_bounds(display_id)
+    except Exception:
+        return None
 
 
 def _grab_display(display_id: int, include_cursor: bool = True) -> Grabber:
@@ -186,6 +338,7 @@ class CaptureProcess:
         stretch_x: float,
         cursor: bool,
         restarts_left: int = MAX_CAPTURE_RESTARTS,
+        capture_fps: int | None = None,
     ) -> None:
         self._mode = mode
         self._display_id = display_id
@@ -193,10 +346,12 @@ class CaptureProcess:
         self._stretch_x = stretch_x
         self._cursor = cursor
         self._restarts_left = restarts_left
+        self._capture_fps = mode.freq if capture_fps is None else capture_fps
         self.n = len(frame)
         self.shm = new_shared_frame(frame)
         self.counter = mp.Value("i", 1)
         self.grab_ms = mp.Value("d", 0.0)
+        self.idle = mp.Value("i", 0)
         self.stop = mp.Event()
         self.proc = None
         self._baseline = self.counter.value
@@ -220,7 +375,8 @@ class CaptureProcess:
             self._stretch_x,
             self._cursor,
             self.grab_ms,
-            self._mode.freq,
+            self._capture_fps,
+            self.idle,
         )
 
     def alive(self) -> bool:
@@ -291,21 +447,35 @@ def format_stream_stats(
     grab_ms: float,
     cursor: bool,
     target_fps: int = TARGET_FPS,
+    capture_target_fps: int | None = None,
+    parked: bool = False,
 ) -> str:
     """One Portuguese status line for the live extend/mirror log.
 
     Example: format_stream_stats("estendendo", 7.4, 60.0, 134.0, True)
     """
     method = "mss+cursor" if cursor else "mss"
-    bottleneck = _stream_bottleneck(capture_fps, usb_fps, target_fps, cursor)
+    cap_target = target_fps if capture_target_fps is None else capture_target_fps
+    bottleneck = _stream_bottleneck(
+        capture_fps, usb_fps, target_fps, cursor, cap_target, parked=parked
+    )
     return (
         f"  {label}  captura {capture_fps:.1f} fps ({method} {grab_ms:.0f}ms)  "
         f"USB {usb_fps:.1f} fps  {bottleneck}"
     )
 
 
-def _stream_bottleneck(capture_fps: float, usb_fps: float, target_fps: int, cursor: bool) -> str:
-    if capture_fps < target_fps * 0.85:
+def _stream_bottleneck(
+    capture_fps: float,
+    usb_fps: float,
+    target_fps: int,
+    cursor: bool,
+    capture_target_fps: int,
+    parked: bool = False,
+) -> str:
+    if parked:
+        return "ponteiro parado"
+    if capture_fps < capture_target_fps * 0.85:
         hint = " — tente --no-cursor" if cursor else ""
         return f"gargalo: captura{hint}"
     if usb_fps < target_fps * 0.85:
@@ -384,6 +554,7 @@ def cmd_extend(
     v_shift: int = 0,
     place: str = "right",
     cursor: bool = True,
+    capture_fps: int | None = None,
 ) -> int:
     """Create a WindowServer display and pump it to the Hagibis (not a clone of the Air)."""
     from PIL import Image
@@ -421,6 +592,7 @@ def cmd_extend(
             underscan=underscan,
             stretch_x=stretch_x,
             cursor=cursor,
+            capture_fps=EXTEND_CAPTURE_FPS if capture_fps is None else capture_fps,
         )
     finally:
         handle.close()
@@ -437,9 +609,17 @@ def _pace_clone(
     stretch_x: float = 1.0,
     cursor: bool = True,
     restart_budget: int = MAX_CAPTURE_RESTARTS,
+    capture_fps: int | None = None,
 ) -> int:
     capture = CaptureProcess(
-        frame, mode, display_id, underscan, stretch_x, cursor, restarts_left=restart_budget
+        frame,
+        mode,
+        display_id,
+        underscan,
+        stretch_x,
+        cursor,
+        restarts_left=restart_budget,
+        capture_fps=capture_fps,
     )
     capture.start()
     cursor_txt = "ligado (mss+blit)" if cursor else "desligado (--no-cursor)"
@@ -520,6 +700,8 @@ def _pump_paced_frames(
             label,
             cursor,
             mode.freq,
+            getattr(capture, "_capture_fps", mode.freq),
+            parked=_capture_parked(capture),
         )
         next_tick = _sleep_until_tick(next_tick, period, now)
     return sent
@@ -568,6 +750,8 @@ def _maybe_print_stats(
     label: str,
     cursor: bool,
     target_fps: int,
+    capture_target_fps: int | None = None,
+    parked: bool = False,
 ) -> tuple[float, int, int]:
     if now - last_log < STATS_INTERVAL_S:
         return last_log, last_sent, last_cap
@@ -580,10 +764,17 @@ def _maybe_print_stats(
             grab_ms.value,
             cursor,
             target_fps,
+            capture_target_fps,
+            parked,
         ),
         flush=True,
     )
     return now, sent, counter.value
+
+
+def _capture_parked(capture) -> bool:
+    idle = getattr(capture, "idle", None)
+    return idle is not None and bool(idle.value)
 
 
 def _sleep_until_tick(next_tick: float, period: float, now: float) -> float:
@@ -593,7 +784,7 @@ def _sleep_until_tick(next_tick: float, period: float, now: float) -> float:
         time.sleep(delay)
         return next_tick
     if delay < -period:
-        return time.monotonic()
+        return now
     return next_tick
 
 
