@@ -118,6 +118,21 @@ MODE_1280x720 = VideoMode(
     pixclk=1650 * 750 * 60,
 )
 
+# VESA 1024x768@60 from big_table_16bit_r0 (65 MHz). Highest mode that stays
+# stable through the HDMI->VGA adapter; 720p (74 MHz) already flickers.
+MODE_1024x768 = VideoMode(
+    width=1024,
+    height=768,
+    freq=60,
+    h_sync_1=encode_hsync1(1024, 1344),
+    h_sync_2=0x00880129,
+    v_sync_1=encode_vsync1(768, 806),
+    v_sync_2=0x02460024,
+    pll=0x000D2102,
+    vic=0,
+    pixclk=1344 * 806 * 60,
+)
+
 # 1920x1080@60 from Fresco's big_table_16bit_r0 (the table the bulk path uses).
 # Raw RGB565 is 4.1 MB/frame = ~249 MB/s: only a SuperSpeed (USB 3) link carries it.
 MODE_1920x1080 = VideoMode(
@@ -204,6 +219,7 @@ NAMED_MODES = {
     "640x360": MODE_640x360,
     "800x600": MODE_800x600,
     "1280x720": MODE_1280x720,
+    "1024x768": MODE_1024x768,
     "1440x900": MODE_1440x900,
     "1920x1080": MODE_1920x1080,
     "1920x1080@30": MODE_1920x1080_30,

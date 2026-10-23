@@ -54,7 +54,9 @@ Outros achados:
 - **`--underscan 0.92` reescala**: em modo nativo o `fit_rgb888` deixa de ser identidade e custa
   ~150 ms/frame (captura a 3 fps). Use `--underscan 1.0`.
 - `1920x1080@60` pede 249 MB/s; o P2016 não aceita o timing, então não foi validado num sink real.
-- O LaunchAgent ficou em `MODE_640x480` (estável). 1440x900/1080p seguem disponíveis via `--mode`.
+- **Teto do link**: 1024x768@60 (65 MHz) fica estável; 1280x720 (74 MHz) pisca pouco; 1280x800 (84
+  MHz) e 1440x900 (107 MHz) piscam muito. O corte está entre 65 e 74 MHz.
+- O LaunchAgent sobe `MODE_1024x768` (65 MHz, o mais alto estável); 1440x900/1080p via `--mode`.
 
 ## Resultado medido (o essencial)
 
