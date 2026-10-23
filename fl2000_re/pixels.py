@@ -79,8 +79,3 @@ def make_bars_rgb565(width: int, height: int) -> bytes:
         c = colors[min(x // bar_w, len(colors) - 1)]
         row += c.to_bytes(2, "little")
     return bytes(row) * height
-
-
-def needs_zlp(nbytes: int, max_packet: int = 512) -> bool:
-    """USB bulk EOF: a max-packet-aligned payload needs an explicit zero-length packet."""
-    return nbytes > 0 and nbytes % max_packet == 0

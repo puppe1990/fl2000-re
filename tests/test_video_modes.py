@@ -9,10 +9,14 @@ from fl2000_re.video_modes import (
     MODE_720x480,
     MODE_800x600,
     MODE_1280x720,
+    MODE_1440x900,
+    MODE_1920x1080,
+    MODE_1920x1080_30,
     default_mirror_mode,
     encode_hsync1,
     encode_vsync1,
     fits_usb2,
+    needs_usb3,
     pll_pixel_clock,
     pxclk_color_bit,
     resolve_mode,
@@ -159,3 +163,78 @@ def test_shift_vsync2_zero_is_identity():
 def test_shift_vsync2_rejects_underflow():
     with pytest.raises(ValueError, match="v_shift=-40"):
         shift_vsync2(0x02420024, -40)
+
+
+def test_1080p60_matches_the_official_16bit_table():
+    """big_table_16bit_r0 (1920x1080@60) is the table the bulk path uses."""
+    assert MODE_1920x1080.h_sync_1 == 0x7800898
+    assert MODE_1920x1080.h_sync_2 == 0x002C00C1
+    assert MODE_1920x1080.v_sync_1 == 0x04380465
+    assert MODE_1920x1080.v_sync_2 == 0x02A5002A
+    assert MODE_1920x1080.pll == 0x00596106
+
+
+def test_1080p60_timings_are_cea_861():
+    assert MODE_1920x1080.h_sync_1 == encode_hsync1(1920, 2200)
+    assert MODE_1920x1080.v_sync_1 == encode_vsync1(1080, 1125)
+    assert MODE_1920x1080.pixclk == 2200 * 1125 * 60
+    assert MODE_1920x1080.vic == 16
+
+
+def test_1080p60_pll_is_148mhz():
+    assert pll_pixel_clock(MODE_1920x1080.pll) == 148_333_333
+
+
+def test_1080p30_matches_the_official_16bit_table():
+    assert MODE_1920x1080_30.freq == 30
+    assert MODE_1920x1080_30.pll == 0x00346107
+    assert MODE_1920x1080_30.vic == 34
+    assert MODE_1920x1080_30.pixclk == 2200 * 1125 * 30
+
+
+def test_1080p_does_not_fit_usb2():
+    assert not fits_usb2(1920, 1080, fps=60)
+    assert not fits_usb2(1920, 1080, fps=30)
+
+
+def test_1080p_needs_usb3():
+    assert needs_usb3(MODE_1920x1080)
+    assert needs_usb3(MODE_1920x1080_30)
+
+
+def test_720x480_does_not_need_usb3():
+    assert not needs_usb3(MODE_720x480)
+    assert not needs_usb3(MODE_640x480)
+
+
+def test_resolve_mode_maps_1080p_names():
+    assert resolve_mode("1920x1080") is MODE_1920x1080
+    assert resolve_mode("1920x1080@30") is MODE_1920x1080_30
+
+
+def test_1440x900_matches_the_official_16bit_table():
+    """Dell P2016 native timing; the monitor rejects 1080p with 'timing not supported'."""
+    assert MODE_1440x900.h_sync_1 == 0x5A00770
+    assert MODE_1440x900.h_sync_2 == 0x00980181
+    assert MODE_1440x900.v_sync_1 == 0x038403A6
+    assert MODE_1440x900.v_sync_2 == 0x02060020
+    assert MODE_1440x900.pll == 0x00406106
+
+
+def test_1440x900_pll_is_106mhz():
+    assert pll_pixel_clock(MODE_1440x900.pll) == 106_666_666
+    assert MODE_1440x900.pixclk == 1904 * 934 * 60
+
+
+def test_1440x900_is_the_p2016_native_timing():
+    assert MODE_1440x900.width / MODE_1440x900.height == 1.6
+    assert MODE_1440x900.freq == 60
+    assert MODE_1440x900.vic == 0
+
+
+def test_1440x900_needs_usb3():
+    assert needs_usb3(MODE_1440x900)
+
+
+def test_resolve_mode_maps_p2016_native():
+    assert resolve_mode("1440x900") is MODE_1440x900

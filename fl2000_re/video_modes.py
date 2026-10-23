@@ -45,6 +45,14 @@ def fits_usb2(
     return width * height * bpp * fps <= budget
 
 
+def needs_usb3(mode: VideoMode) -> bool:
+    """True when raw frames outrun the USB 2.0 budget and need a SuperSpeed link.
+
+    Example: needs_usb3(MODE_1920x1080) is True
+    """
+    return mode.width * mode.height * mode.bpp * mode.freq > USB2_BUDGET_BPS
+
+
 def pll_pixel_clock(pll: int) -> int:
     """FL2000 VGA PLL: 10 MHz XTAL * multiplier / (prescaler * divisor)."""
     divisor = pll & 0xFF
@@ -110,6 +118,50 @@ MODE_1280x720 = VideoMode(
     pixclk=1650 * 750 * 60,
 )
 
+# 1920x1080@60 from Fresco's big_table_16bit_r0 (the table the bulk path uses).
+# Raw RGB565 is 4.1 MB/frame = ~249 MB/s: only a SuperSpeed (USB 3) link carries it.
+MODE_1920x1080 = VideoMode(
+    width=1920,
+    height=1080,
+    freq=60,
+    h_sync_1=encode_hsync1(1920, 2200),
+    h_sync_2=0x002C00C1,
+    v_sync_1=encode_vsync1(1080, 1125),
+    v_sync_2=0x02A5002A,
+    pll=0x00596106,
+    vic=16,
+    pixclk=2200 * 1125 * 60,
+)
+
+# Same raster at half the pixel clock; ~124 MB/s still exceeds USB 2.0.
+MODE_1920x1080_30 = VideoMode(
+    width=1920,
+    height=1080,
+    freq=30,
+    h_sync_1=encode_hsync1(1920, 2200),
+    h_sync_2=0x002C00C1,
+    v_sync_1=encode_vsync1(1080, 1125),
+    v_sync_2=0x02A5002A,
+    pll=0x00346107,
+    vic=34,
+    pixclk=2200 * 1125 * 30,
+)
+
+# Dell P2016 native 1440x900@60 from the same official table. Its OSD rejects
+# 1080p ("input timing is not supported") and locks this mode at 1:1.
+MODE_1440x900 = VideoMode(
+    width=1440,
+    height=900,
+    freq=60,
+    h_sync_1=encode_hsync1(1440, 1904),
+    h_sync_2=0x00980181,
+    v_sync_1=encode_vsync1(900, 934),
+    v_sync_2=0x02060020,
+    pll=0x00406106,
+    vic=0,
+    pixclk=1904 * 934 * 60,
+)
+
 MODE_800x600 = VideoMode(
     width=800,
     height=600,
@@ -152,6 +204,9 @@ NAMED_MODES = {
     "640x360": MODE_640x360,
     "800x600": MODE_800x600,
     "1280x720": MODE_1280x720,
+    "1440x900": MODE_1440x900,
+    "1920x1080": MODE_1920x1080,
+    "1920x1080@30": MODE_1920x1080_30,
 }
 
 

@@ -9,7 +9,7 @@ from fl2000_re.letterbox import UNDERSCAN
 from fl2000_re.log_time import install_timestamped_streams
 from fl2000_re.probe import cmd_detect, cmd_dump, cmd_edid
 from fl2000_re.stream import EXTEND_CAPTURE_FPS, cmd_bars, cmd_extend, cmd_mirror
-from fl2000_re.video_modes import NAMED_MODES, resolve_mode
+from fl2000_re.video_modes import NAMED_MODES, MODE_640x480, default_mirror_mode, resolve_mode
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -46,9 +46,9 @@ def build_parser() -> argparse.ArgumentParser:
     )
     ap.add_argument(
         "--mode",
-        default="720x480",
+        default=None,
         choices=sorted(NAMED_MODES),
-        help="timing (P2016 no VGA: 640x480)",
+        help="timing (P2016 no VGA: 640x480; USB 3: 1920x1080)",
     )
     ap.add_argument(
         "--v-shift",
@@ -93,13 +93,14 @@ def main() -> int:
     except DongleNotFoundError as exc:
         print(exc)
         return 1
+    mode = resolve_mode(args.mode) if args.mode else None
+    if args.cmd in ("mirror", "extend"):
+        mode = mode or default_mirror_mode()
     if args.cmd == "mirror":
-        mode = resolve_mode(args.mode)
         return cmd_mirror(
             fl, args.seconds, args.monitor, args.underscan, args.stretch_x, mode, args.v_shift
         )
     if args.cmd == "extend":
-        mode = resolve_mode(args.mode)
         return cmd_extend(
             fl,
             args.seconds,
@@ -123,7 +124,7 @@ def main() -> int:
     if args.cmd in ("edid", "all"):
         rc = cmd_edid(fl) or rc
     if args.cmd == "bars":
-        rc = cmd_bars(fl, args.seconds)
+        rc = cmd_bars(fl, args.seconds, mode or MODE_640x480)
     return rc
 
 

@@ -3,7 +3,6 @@
 import pytest
 from fl2000_re.pixels import (
     dword_swap_frame,
-    needs_zlp,
     pack_frame,
     rgb888_to_rgb332,
     rgb888_to_rgb565,
@@ -42,14 +41,6 @@ def test_rgb888_rejects_odd_length():
         rgb888_to_rgb565(bytes([1, 2]))
 
 
-def test_640x480_rgb565_needs_zlp():
-    assert needs_zlp(640 * 480 * 2)
-
-
-def test_short_packet_does_not_need_zlp():
-    assert not needs_zlp(513)
-
-
 def test_red_rgb332():
     assert rgb888_to_rgb332(bytes([255, 0, 0])) == bytes([0xE0])
 
@@ -85,3 +76,9 @@ def test_pack_frame_is_byte_identical_across_rebuilds():
     """Unpaced rewrites of identical bytes still risk mid-scanout tears; rebuilds must match."""
     rgb = bytes([i % 256 for i in range(3 * 64 * 48)])
     assert pack_frame(rgb, 2) == pack_frame(rgb, 2)
+
+
+def test_1080p_rgb565_frame_is_4147200_bytes():
+    """1920x1080 RGB565 is 4.1 MB/frame: ~249 MB/s at 60 Hz, USB 3 territory."""
+    rgb = bytes(1920 * 1080 * 3)
+    assert len(rgb888_to_rgb565(rgb)) == 4_147_200

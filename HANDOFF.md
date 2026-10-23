@@ -11,11 +11,50 @@ Deixar a imagem no monitor ligado ao **Hagibis FL2000DX** (`1d5c:2000`) **nítid
 ## Hardware de teste
 
 - MacBook Air M2 (Mac14,15), macOS 14.5.
-- Dongle: Hagibis FL2000DX + transmissor IT66121, USB 2.0.
+- Dongle: Hagibis FL2000DX + transmissor IT66121, USB 3.0 (SuperSpeed) na porta direta; 480 Mb/s
+  atrás do hub VIA USB 2.
 - Monitores: interno 2880x1864 retina; **Dell P2219H** 1920x1080; **Dell P2016** 1440x900.
 - Saída do Hagibis testada de duas formas:
   - HDMI → **adaptador HDMI→VGA** → P2016.
   - HDMI → **direto** no P2219H (sem adaptador).
+
+## 2026-10-23 — USB 3: 1440x900 nativo no P2016
+
+O Hagibis passou a enumerar em **SuperSpeed** (`bcdUSB=0x300`, `speed=4`, 5 Gb/s) plugado direto. A
+premissa "640x480 é o teto" era do link USB 2, não do chip.
+
+Timings do driver oficial Fresco (`big_table_16bit_r0`, a tabela do bulk 16-bit). O pacote Windows
+de 2017 traz o mesmo código (`RENDER_COMPRESSION_AUTOUPDATETIMER_CONTEXT`); a compressão gravity só
+é forçada em USB 2, então em USB 3 o caminho é RGB565 cru. Modos novos: `1440x900` (P2016 nativo),
+`1920x1080`, `1920x1080@30`; `bars` e `--mode` por comando.
+
+Medido com o P2016 (HDMI→VGA, `--underscan 1.0`):
+
+| teste               | resultado                                                   |
+| ------------------- | ----------------------------------------------------------- |
+| bars 1440x900       | 146 fps (~379 MB/s) — sobra para 60 Hz                      |
+| extend 1440x900     | USB **60,0 fps**, captura ~22 fps, grab 20 ms, sem gargalo  |
+| extend 1920x1080@30 | USB 29 fps; P2016 rejeita o timing ("not supported")        |
+| bars 1920x1080      | 42 fps (176 MB/s) — sink não aceitou o modo, não conclusivo |
+
+Outros achados:
+
+- **O bug real era o ZLP**: o chip usa o pacote de comprimento zero como EOF do bulk. O repo só
+  mandava o ZLP quando o frame era múltiplo de 512 bytes — e 1440x900 (2.592.000) é o único modo não
+  múltiplo. Sem ZLP o chip nunca via fim de frame. O driver oficial submete o `zero_length_urb`
+  **depois de todo frame**; corrigido em `send_frame` (regressão em
+  `test_send_frame_always_terminates_with_zlp`).
+- Com o ZLP corrigido as listras **aparecem** em 1440x900, mas **piscam** (1280x800/1280x1024
+  também): 60 fps estáveis no chip, frame counter subindo, `lbuf_ovf` normal, sem underflow, monitor
+  conectado. Em 640x480 fica estável. O suspeito é o link TMDS/adaptador HDMI→VGA em clock alto (>80
+  MHz), não o chip. Teste decisivo: Hagibis direto no HDMI de um sink digital (P2219H).
+- **QoS do launchd importa**: com `ProcessType` padrão o pump caía a ~44 fps num frame de 2,6 MB.
+  `ProcessType=Interactive` no plist devolveu 60,0. Com 640x480 o frame é 4x menor e o custo fixo de
+  escalonamento não aparecia.
+- **`--underscan 0.92` reescala**: em modo nativo o `fit_rgb888` deixa de ser identidade e custa
+  ~150 ms/frame (captura a 3 fps). Use `--underscan 1.0`.
+- `1920x1080@60` pede 249 MB/s; o P2016 não aceita o timing, então não foi validado num sink real.
+- O LaunchAgent ficou em `MODE_640x480` (estável). 1440x900/1080p seguem disponíveis via `--mode`.
 
 ## Resultado medido (o essencial)
 

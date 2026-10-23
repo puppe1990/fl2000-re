@@ -68,8 +68,17 @@ tests/test_<module>.py    mirrors the package
 
 - Default clone/extend HDMI is 720x480 RGB565 @ 60 Hz (CEA 480p 16:9). 640x480 4:3 is stretched on
   the Dell 16:9. 720p RGB565 overruns USB 2.0. 800x600 RGB332 never locked.
-- `extend` virtual desktop is also 720x480 1x (matches HDMI). Do not make it HiDPI — that downscales
-  UI on the Dell again.
+- USB 3 changes the ceiling: 1440x900/1080p timings from Fresco's `big_table_16bit_r0` lock and
+  stream, but flicker through the HDMI→VGA adapter above ~80 MHz; 640x480 stays stable and is what
+  the LaunchAgent runs. Native modes need `--underscan 1.0`; the 0.92 default rescales and costs
+  ~150 ms/frame.
+- Every bulk frame MUST end with a zero-length packet. The chip's EOF is the ZLP (REG_ACLK bit 28),
+  not the transfer's short packet; the reference driver submits one per frame unconditionally.
+  Gating it on 512-byte alignment broke 1440x900 (2026-10-23).
+- The LaunchAgent plist needs `ProcessType=Interactive`. At 2.6 MB/frame, Standard QoS capped the
+  pump at ~44 fps.
+- `extend` makes the virtual desktop 1x at exactly the HDMI mode (640x480 for the agent). Do not
+  make it HiDPI — that downscales UI on the Dell again.
 - Both Hagibis HDMIs always show the same FL2000 stream. Native USB-C HDMI is a separate GPU pipe
   and is unrelated.
 - REG_ACLK bit 28 must stay set (EOF = ZLP) or bulk NAKs forever.
