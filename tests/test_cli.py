@@ -62,14 +62,23 @@ def test_cli_mirror_accepts_p2016_vga_fill():
     assert ns.stretch_x == 1.2
 
 
-def test_cli_mode_defaults_to_hdmi_timing():
-    ns = build_parser().parse_args(["mirror"])
-    assert ns.mode == "720x480"
+def test_cli_mode_defaults_to_none_so_each_command_picks_its_timing():
+    assert build_parser().parse_args(["mirror"]).mode is None
 
 
 def test_cli_mode_accepts_vga_timing():
     ns = build_parser().parse_args(["mirror", "--mode", "640x480"])
     assert ns.mode == "640x480"
+
+
+def test_cli_mode_accepts_1080p():
+    ns = build_parser().parse_args(["extend", "--mode", "1920x1080"])
+    assert ns.mode == "1920x1080"
+
+
+def test_cli_mode_accepts_1080p30():
+    ns = build_parser().parse_args(["extend", "--mode", "1920x1080@30"])
+    assert ns.mode == "1920x1080@30"
 
 
 def test_cli_v_shift_defaults_to_zero():
@@ -156,3 +165,60 @@ def test_cli_accepts_monitor_log_with_out():
     ns = build_parser().parse_args(["monitor-log", "--out", "monitor.jsonl"])
     assert ns.cmd == "monitor-log"
     assert ns.out == "monitor.jsonl"
+
+
+def test_cli_main_bars_defaults_to_vga_timing(monkeypatch):
+    import sys
+
+    from fl2000_re import cli
+    from fl2000_re.video_modes import MODE_640x480
+
+    seen: dict[str, object] = {}
+
+    def fake_bars(_fl, _seconds, mode=None):
+        seen["mode"] = mode
+        return 0
+
+    monkeypatch.setattr(cli, "FL2000", lambda: object())
+    monkeypatch.setattr(cli, "cmd_bars", fake_bars)
+    monkeypatch.setattr(sys, "argv", ["hagibis_re.py", "bars"])
+    assert cli.main() == 0
+    assert seen["mode"] is MODE_640x480
+
+
+def test_cli_main_bars_honors_the_mode_flag(monkeypatch):
+    import sys
+
+    from fl2000_re import cli
+    from fl2000_re.video_modes import MODE_1920x1080
+
+    seen: dict[str, object] = {}
+
+    def fake_bars(_fl, _seconds, mode=None):
+        seen["mode"] = mode
+        return 0
+
+    monkeypatch.setattr(cli, "FL2000", lambda: object())
+    monkeypatch.setattr(cli, "cmd_bars", fake_bars)
+    monkeypatch.setattr(sys, "argv", ["hagibis_re.py", "bars", "--mode", "1920x1080"])
+    assert cli.main() == 0
+    assert seen["mode"] is MODE_1920x1080
+
+
+def test_cli_main_mirror_resolves_the_default_timing(monkeypatch):
+    import sys
+
+    from fl2000_re import cli
+    from fl2000_re.video_modes import default_mirror_mode
+
+    seen: dict[str, object] = {}
+
+    def fake_mirror(*args):
+        seen["mode"] = args[5]
+        return 0
+
+    monkeypatch.setattr(cli, "FL2000", lambda: object())
+    monkeypatch.setattr(cli, "cmd_mirror", fake_mirror)
+    monkeypatch.setattr(sys, "argv", ["hagibis_re.py", "mirror"])
+    assert cli.main() == 0
+    assert seen["mode"] is default_mirror_mode()

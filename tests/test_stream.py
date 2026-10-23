@@ -413,10 +413,15 @@ def test_send_frame_adds_zlp_when_max_packet_aligned():
     assert fl.dev.packets == [bytes(512), b""]
 
 
-def test_send_frame_skips_zlp_when_short():
+def test_send_frame_always_terminates_with_zlp():
+    """The bulk EOF is the zero-length packet, not the short packet (reference driver).
+
+    Only 512-aligned frames got a ZLP before; 1440x900 (2,592,000 bytes) is not
+    aligned and the chip never saw end-of-frame (2026-10-23).
+    """
     fl = FL2000(dev=FakeBulkDevice())
     send_frame(fl, bytes(100))
-    assert fl.dev.packets == [bytes(100)]
+    assert fl.dev.packets == [bytes(100), b""]
 
 
 def test_capture_process_starts_the_child_paced_to_the_mode_refresh(monkeypatch):
@@ -965,3 +970,49 @@ def test_pace_clone_streams_paced_without_relying_on_capture(monkeypatch):
     assert stream._pace_clone(fl, bytes(512), MODE_640x480, None, 0.1) == 0
     assert fl.dev.packets
     assert set(fl.dev.packets) == {bytes(512), b""}
+
+
+def test_link_warning_is_quiet_on_usb3():
+    from fl2000_re.stream import link_warning
+    from fl2000_re.video_modes import MODE_1920x1080
+
+    assert link_warning(4, MODE_1920x1080) is None
+
+
+def test_link_warning_flags_1080p_on_usb2():
+    from fl2000_re.stream import link_warning
+    from fl2000_re.video_modes import MODE_1920x1080
+
+    message = link_warning(3, MODE_1920x1080)
+    assert message is not None
+    assert "USB 2" in message
+    assert "249 MB/s" in message
+
+
+def test_link_warning_ignores_small_modes_and_unknown_speed():
+    from fl2000_re.stream import link_warning
+    from fl2000_re.video_modes import MODE_720x480, MODE_1920x1080
+
+    assert link_warning(3, MODE_720x480) is None
+    assert link_warning(None, MODE_1920x1080) is None
+
+
+def test_cmd_bars_streams_the_requested_mode(monkeypatch):
+    """bars is the bring-up smoke test: --mode 1920x1080 must reach the HDMI path."""
+    from fl2000_re.video_modes import MODE_1920x1080
+
+    seen: dict[str, object] = {}
+
+    def fake_bring_up(_fl, mode, _v_shift=0):
+        seen["mode"] = mode
+        return 0
+
+    def fake_pump(_fl, frame, _seconds):
+        seen["frame_len"] = len(frame)
+        return 0
+
+    monkeypatch.setattr(stream, "bring_up_hdmi", fake_bring_up)
+    monkeypatch.setattr(stream, "_pump_until", fake_pump)
+    assert stream.cmd_bars(FL2000(dev=FakeBulkDevice()), 0.01, MODE_1920x1080) == 0
+    assert seen["mode"] is MODE_1920x1080
+    assert seen["frame_len"] == 4_147_200

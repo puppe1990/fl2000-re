@@ -83,6 +83,17 @@ def test_render_plist_escapes_xml_in_paths():
     assert "/r&p<o>" not in xml
 
 
+def test_render_plist_runs_interactive_so_the_60hz_pump_is_scheduled():
+    """Standard QoS dropped the 2.6 MB 1440x900 frame pump to ~44 fps."""
+    xml = render_plist(
+        repo=Path("/repo"),
+        python=Path("/repo/.venv/bin/python"),
+        log=Path("/tmp/extend.log"),
+    )
+    assert "<key>ProcessType</key>" in xml
+    assert "<string>Interactive</string>" in xml
+
+
 def test_write_launch_agent_plist_creates_file(tmp_path: Path):
     dest = tmp_path / "Library" / "LaunchAgents" / f"{LABEL}.plist"
     path = write_launch_agent_plist(
@@ -124,6 +135,7 @@ def test_cmd_extend_agent_shows_the_pointer(monkeypatch):
     import fl2000_re.launch_agent as launch_agent
     import fl2000_re.stream as stream
     from fl2000_re import fl2000_usb
+    from fl2000_re.video_modes import MODE_640x480
 
     monkeypatch.setattr(launch_agent, "wait_for_dongle", lambda *_a, **_k: True)
     monkeypatch.setattr(launch_agent, "unmount_fake_cd", lambda *_a, **_k: None)
@@ -131,9 +143,9 @@ def test_cmd_extend_agent_shows_the_pointer(monkeypatch):
     monkeypatch.setattr(fl2000_usb, "FL2000", lambda *_a, **_k: object())
     seen: dict[str, object] = {}
 
-    def fake_extend(
-        _fl, _seconds, _underscan, _stretch_x, _mode, _v_shift, _place, cursor, **kwargs
-    ):
+    def fake_extend(_fl, _seconds, underscan, _stretch_x, mode, _v_shift, _place, cursor, **kwargs):
+        seen["underscan"] = underscan
+        seen["mode"] = mode
         seen["cursor"] = cursor
         seen["capture_fps"] = kwargs.get("capture_fps")
         return 0
@@ -141,6 +153,8 @@ def test_cmd_extend_agent_shows_the_pointer(monkeypatch):
     monkeypatch.setattr(stream, "cmd_extend", fake_extend)
     assert cmd_extend_agent() == 0
     assert seen["cursor"] is True
+    assert seen["mode"] is MODE_640x480
+    assert seen["underscan"] == 1.0
     assert seen["capture_fps"] == stream.EXTEND_CAPTURE_FPS
 
 

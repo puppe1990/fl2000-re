@@ -21,12 +21,13 @@ from fl2000_re.fl2000_usb import FL2000
 from fl2000_re.frame_buffer import new_shared_frame, write_shared_frame
 from fl2000_re.hdmi import bring_up_hdmi
 from fl2000_re.letterbox import UNDERSCAN
-from fl2000_re.pixels import dword_swap_frame, make_bars_rgb565, needs_zlp, pack_frame
+from fl2000_re.pixels import dword_swap_frame, make_bars_rgb565, pack_frame
 from fl2000_re.registers import BULK_EP
-from fl2000_re.video_modes import MODE_640x480, VideoMode, default_mirror_mode
+from fl2000_re.video_modes import MODE_640x480, VideoMode, default_mirror_mode, needs_usb3
 
 STATS_INTERVAL_S = 1.0
 TARGET_FPS = 60
+USB3_LINK_SPEED = 4
 # USB still pumps 60 Hz by resending the last frame. Grabbing ~69 fps via
 # CGWindowListCreateImage is what pinned WindowServer on the 8 GB Air
 # (2026-10-20: grab 636-2735 ms, then four btn_rst freezes).
@@ -84,8 +85,10 @@ def send_frame(fl: FL2000, frame: bytes) -> None:
     # Full-frame bulk rewrite outlasts one scanout, so a changed frame tears
     # once mid-screen: expected on this single-buffered chip, not a bug.
     fl.dev.write(BULK_EP, frame, timeout=2000)
-    if not needs_zlp(len(frame)):
-        return
+    # The chip's bulk EOF is this zero-length packet (REG_ACLK bit 28), not the
+    # transfer's short packet. The reference driver submits one after EVERY frame;
+    # gating it on 512-byte alignment left non-aligned frames (1440x900) with no
+    # end-of-frame at all (2026-10-23).
     with contextlib.suppress(usb.core.USBError):
         fl.dev.write(BULK_EP, b"", timeout=50)
 
@@ -209,9 +212,30 @@ def release_bulk(fl: FL2000) -> None:
         usb.util.release_interface(fl.dev, 0)
 
 
-def cmd_bars(fl: FL2000, seconds: float) -> int:
-    mode = MODE_640x480
+def link_warning(usb_speed: int | None, mode: VideoMode) -> str | None:
+    """Warning when the mode's raw frames need USB 3 but the dongle is on USB 2.
+
+    Example: link_warning(3, MODE_1920x1080) is not None
+    """
+    if usb_speed is None or usb_speed >= USB3_LINK_SPEED or not needs_usb3(mode):
+        return None
+    needed_mbps = mode.width * mode.height * mode.bpp * mode.freq / 1_000_000
+    return (
+        f"aviso: {mode.width}x{mode.height}@{mode.freq} precisa de ~{needed_mbps:.0f} MB/s; "
+        "o link atual e USB 2 (42 MB/s). Use uma porta USB 3."
+    )
+
+
+def _print_link_warning(fl: FL2000, mode: VideoMode) -> None:
+    warning = link_warning(getattr(fl.dev, "speed", None), mode)
+    if warning:
+        print(f"  {warning}")
+
+
+def cmd_bars(fl: FL2000, seconds: float, mode: VideoMode | None = None) -> int:
+    mode = MODE_640x480 if mode is None else mode
     print(f"== test pattern {mode.width}x{mode.height} RGB565 ==")
+    _print_link_warning(fl, mode)
     frame = dword_swap_frame(make_bars_rgb565(mode.width, mode.height))
     if bring_up_hdmi(fl, mode) != 0:
         return 1
@@ -523,6 +547,7 @@ def cmd_mirror(
     mode = default_mirror_mode() if mode is None else mode
     fmt = "RGB332" if mode.bpp == 1 else "RGB565"
     print(f"== espelho da tela → HDMI {mode.width}x{mode.height} {fmt} ==")
+    _print_link_warning(fl, mode)
     from PIL import Image
 
     print(f"  capturando display (monitor={monitor})")
@@ -564,6 +589,7 @@ def cmd_extend(
     mode = default_mirror_mode() if mode is None else mode
     fmt = "RGB332" if mode.bpp == 1 else "RGB565"
     print(f"== tela extra (extend) → HDMI {mode.width}x{mode.height} {fmt} ==")
+    _print_link_warning(fl, mode)
     handle = spawn_virtual_display(width=mode.width, height=mode.height, place=place)
     try:
         screen = handle.screen

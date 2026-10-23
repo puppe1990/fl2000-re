@@ -60,6 +60,10 @@ def render_plist(*, repo: Path, python: Path, log: Path) -> str:
   <true/>
   <key>ThrottleInterval</key>
   <integer>15</integer>
+  <!-- Interactive keeps the 60 Hz bulk pump scheduled: at 1440x900 a frame is
+       2.6 MB, and a Standard-QoS agent missed ticks down to ~44 fps. -->
+  <key>ProcessType</key>
+  <string>Interactive</string>
   <key>WorkingDirectory</key>
   <string>{repo_s}</string>
   <key>EnvironmentVariables</key>
@@ -185,6 +189,8 @@ def cmd_extend_agent() -> int:
     from fl2000_re.fl2000_usb import FL2000
     from fl2000_re.stream import EXTEND_CAPTURE_FPS, cmd_extend
 
+    # 640x480 is the only mode that stays stable through the HDMI→VGA adapter;
+    # 1440x900/1080p lock but flicker hard at high pixel clocks (2026-10-23).
     return cmd_extend(
         FL2000(), 0, 1.0, 1.0, MODE_640x480, 0, "left", True, capture_fps=EXTEND_CAPTURE_FPS
     )
