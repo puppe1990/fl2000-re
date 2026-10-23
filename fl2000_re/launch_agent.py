@@ -15,7 +15,7 @@ from typing import Any
 import usb.core
 
 from fl2000_re.registers import FL2000_USB_PID, FL2000_USB_VID
-from fl2000_re.video_modes import MODE_640x480
+from fl2000_re.video_modes import MODE_1024x768
 
 LABEL = "com.fl2000-re.extend"
 POLL_S = 2.0
@@ -189,10 +189,10 @@ def cmd_extend_agent() -> int:
     from fl2000_re.fl2000_usb import FL2000
     from fl2000_re.stream import EXTEND_CAPTURE_FPS, cmd_extend
 
-    # 640x480 is the only mode that stays stable through the HDMI→VGA adapter;
-    # 1440x900/1080p lock but flicker hard at high pixel clocks (2026-10-23).
+    # 1024x768@60 is 65 MHz: the highest mode that stays stable through the
+    # HDMI->VGA adapter. 720p (74 MHz) already flickers; 1440x900 is unusable.
     return cmd_extend(
-        FL2000(), 0, 1.0, 1.0, MODE_640x480, 0, "left", True, capture_fps=EXTEND_CAPTURE_FPS
+        FL2000(), 0, 1.0, 1.0, MODE_1024x768, 0, "left", True, capture_fps=EXTEND_CAPTURE_FPS
     )
 
 

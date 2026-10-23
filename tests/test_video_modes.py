@@ -8,6 +8,7 @@ from fl2000_re.video_modes import (
     MODE_640x480,
     MODE_720x480,
     MODE_800x600,
+    MODE_1024x768,
     MODE_1280x720,
     MODE_1440x900,
     MODE_1920x1080,
@@ -238,3 +239,27 @@ def test_1440x900_needs_usb3():
 
 def test_resolve_mode_maps_p2016_native():
     assert resolve_mode("1440x900") is MODE_1440x900
+
+
+def test_1024x768_matches_the_official_16bit_table():
+    """VESA 1024x768@60 at 65 MHz is the highest mode that stays stable on the VGA sink."""
+    assert MODE_1024x768.h_sync_1 == 0x04000540
+    assert MODE_1024x768.h_sync_2 == 0x00880129
+    assert MODE_1024x768.v_sync_1 == 0x03000326
+    assert MODE_1024x768.v_sync_2 == 0x02460024
+    assert MODE_1024x768.pll == 0x000D2102
+
+
+def test_1024x768_pll_is_65mhz():
+    assert pll_pixel_clock(MODE_1024x768.pll) == 65_000_000
+    assert MODE_1024x768.pixclk == 1344 * 806 * 60
+
+
+def test_1024x768_stays_below_the_high_clock_afe():
+    """Above ~80 MHz the HDMI->VGA link flickers; 1024x768 is 65 MHz."""
+    assert MODE_1024x768.pixclk < 80_000_000
+    assert needs_usb3(MODE_1024x768)
+
+
+def test_resolve_mode_maps_1024x768():
+    assert resolve_mode("1024x768") is MODE_1024x768
