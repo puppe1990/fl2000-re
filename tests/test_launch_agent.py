@@ -148,12 +148,15 @@ def test_cmd_extend_agent_shows_the_pointer(monkeypatch):
         seen["mode"] = mode
         seen["cursor"] = cursor
         seen["capture_fps"] = kwargs.get("capture_fps")
+        seen["virtual_size"] = kwargs.get("virtual_size")
         return 0
 
     monkeypatch.setattr(stream, "cmd_extend", fake_extend)
     assert cmd_extend_agent() == 0
     assert seen["cursor"] is True
     assert seen["mode"] is MODE_1024x768
+    assert seen["virtual_size"] == launch_agent.VIRTUAL_DESKTOP
+    assert launch_agent.VIRTUAL_DESKTOP == (1280, 960)
     assert seen["underscan"] == 1.0
     assert seen["capture_fps"] == stream.EXTEND_CAPTURE_FPS
 

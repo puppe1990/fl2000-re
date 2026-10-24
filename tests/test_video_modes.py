@@ -18,6 +18,7 @@ from fl2000_re.video_modes import (
     encode_vsync1,
     fits_usb2,
     needs_usb3,
+    parse_size,
     pll_pixel_clock,
     pxclk_color_bit,
     resolve_mode,
@@ -263,3 +264,17 @@ def test_1024x768_stays_below_the_high_clock_afe():
 
 def test_resolve_mode_maps_1024x768():
     assert resolve_mode("1024x768") is MODE_1024x768
+
+
+def test_parse_size_accepts_wxh():
+    assert parse_size("1280x800") == (1280, 800)
+
+
+def test_parse_size_rejects_missing_x():
+    with pytest.raises(ValueError, match="'1280'"):
+        parse_size("1280")
+
+
+def test_parse_size_rejects_zero():
+    with pytest.raises(ValueError, match="'0x800'"):
+        parse_size("0x800")

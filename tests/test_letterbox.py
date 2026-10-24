@@ -132,3 +132,21 @@ def test_fit_keeps_left_edge_when_source_is_wider_than_2x_dest():
     src = row * height
     out = fit_rgb888(src, width, height, dst_w, dst_h)
     assert max(out) > 100
+
+
+def test_small_downscale_resizes_straight_to_the_destination(monkeypatch):
+    """--virtual 1280x800 -> 1024x768: direct LANCZOS (32 ms) beats the 2x path (55 ms)."""
+    import fl2000_re.letterbox as letterbox
+
+    calls = []
+    real = letterbox._letterbox_into
+
+    def spy(src, sw, sh, dw, dh, underscan, stretch_x):
+        calls.append((dw, dh))
+        return real(src, sw, sh, dw, dh, underscan, stretch_x)
+
+    monkeypatch.setattr(letterbox, "_letterbox_into", spy)
+    src = bytes([255, 255, 255]) * (16 * 10)
+    out = letterbox.fit_rgb888(src, 16, 10, 12, 10, 1.0, 1.0)
+    assert calls == [(12, 10)]
+    assert len(out) == 12 * 10 * 3

@@ -10,7 +10,7 @@ import pytest
 from fl2000_re.fl2000_usb import FL2000
 from fl2000_re.registers import BULK_EP
 from fl2000_re.stream import capture_period_s, frame_period_s, send_frame
-from fl2000_re.video_modes import MODE_640x480
+from fl2000_re.video_modes import MODE_640x480, MODE_1024x768
 
 
 class FakeBulkDevice:
@@ -814,7 +814,11 @@ def _stub_extend_preview(monkeypatch, tmp_path):
         seen["brought_up"] = True
         return 0
 
-    monkeypatch.setattr("fl2000_re.virtual_display.spawn_virtual_display", lambda **_k: handle)
+    def fake_spawn(**kwargs):
+        seen["spawn"] = kwargs
+        return handle
+
+    monkeypatch.setattr("fl2000_re.virtual_display.spawn_virtual_display", fake_spawn)
     monkeypatch.setattr(stream, "grab_cg_display_rgb", boom_cg)
     monkeypatch.setattr(stream, "grab_main_display_rgb", boom_main)
     monkeypatch.setattr(stream, "grab_via_screencapture", fake_preview)
@@ -834,6 +838,24 @@ def test_cmd_extend_preview_never_calls_mss(monkeypatch, tmp_path):
     assert seen["pace_display"] == 18
     assert seen["pace_cursor"] is False
     assert (tmp_path / "preview.png").is_file()
+
+
+def test_cmd_extend_virtual_defaults_to_the_hdmi_mode(monkeypatch, tmp_path):
+    seen = _stub_extend_preview(monkeypatch, tmp_path)
+    fl = FL2000(dev=FakeBulkDevice())
+    assert stream.cmd_extend(fl, 0.01, underscan=1.0, mode=MODE_1024x768, place="left") == 0
+    assert seen["spawn"] == {"width": 1024, "height": 768, "place": "left"}
+
+
+def test_cmd_extend_spawns_a_larger_virtual_desktop(monkeypatch, tmp_path):
+    """--virtual 1280x800 draws the UI smaller; the HDMI stays at 1024x768."""
+    seen = _stub_extend_preview(monkeypatch, tmp_path)
+    fl = FL2000(dev=FakeBulkDevice())
+    rc = stream.cmd_extend(
+        fl, 0.01, underscan=1.0, mode=MODE_1024x768, place="left", virtual_size=(1280, 800)
+    )
+    assert rc == 0
+    assert seen["spawn"] == {"width": 1280, "height": 800, "place": "left"}
 
 
 def test_cmd_extend_defaults_cursor_on_into_pace(monkeypatch, tmp_path):

@@ -580,17 +580,25 @@ def cmd_extend(
     place: str = "right",
     cursor: bool = True,
     capture_fps: int | None = None,
+    virtual_size: tuple[int, int] | None = None,
 ) -> int:
-    """Create a WindowServer display and pump it to the Hagibis (not a clone of the Air)."""
+    """Create a WindowServer display and pump it to the Hagibis (not a clone of the Air).
+
+    virtual_size lets the desktop be drawn larger than the HDMI mode (e.g. 1280x800
+    downscaled to the stable 1024x768) so the UI comes out smaller.
+    """
     from PIL import Image
 
     from fl2000_re.virtual_display import spawn_virtual_display
 
     mode = default_mirror_mode() if mode is None else mode
+    virtual_w, virtual_h = virtual_size or (mode.width, mode.height)
     fmt = "RGB332" if mode.bpp == 1 else "RGB565"
     print(f"== tela extra (extend) → HDMI {mode.width}x{mode.height} {fmt} ==")
     _print_link_warning(fl, mode)
-    handle = spawn_virtual_display(width=mode.width, height=mode.height, place=place)
+    if (virtual_w, virtual_h) != (mode.width, mode.height):
+        print(f"  desktop virtual {virtual_w}x{virtual_h} reduzido para {mode.width}x{mode.height}")
+    handle = spawn_virtual_display(width=virtual_w, height=virtual_h, place=place)
     try:
         screen = handle.screen
         print(

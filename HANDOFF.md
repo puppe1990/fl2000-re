@@ -61,7 +61,12 @@ Outros achados:
   `preview.png` e no grab do filho), então é o monitor: Display → **Reset Display** devolve o padrão
   daquele modo; `Vertical Position` (50) ajusta fino. `--v-shift` não resolve: o vstart só tem ~2
   linhas de folga no 1024x768 e aumentar o blanking derruba o USB para ~46 fps.
-- O LaunchAgent sobe `MODE_1024x768` (65 MHz, o mais alto estável); 1440x900/1080p via `--mode`.
+- **`--virtual`**: a tela virtual pode ser maior que o HDMI e é reduzida (1280x960 → 1024x768, UI
+  ~20% menor). Tem que ser a **mesma proporção** do modo, senão letterboxa (1280x800 → 1024x768
+  deixa barras em cima/embaixo). O downscale pequeno usa LANCZOS direto; o caminho 2x custava 55 ms
+  e limitava a captura a ~10 fps (com o fast path fica ~20 fps). O LaunchAgent usa 1280x960.
+- O LaunchAgent sobe `MODE_1024x768` (65 MHz, o mais alto estável) com desktop virtual 1280x960;
+  1440x900/1080p via `--mode`.
 
 ## Resultado medido (o essencial)
 

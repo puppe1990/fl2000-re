@@ -79,6 +79,9 @@ tests/test_<module>.py    mirrors the package
   pump at ~44 fps.
 - `extend` makes the virtual desktop 1x at exactly the HDMI mode (1024x768 for the agent). Do not
   make it HiDPI — that downscales UI on the Dell again.
+- `--virtual WxH` must match the HDMI mode's aspect or the fit letterboxes: 1280x960 → 1024x768 is
+  the agent profile (UI ~20% smaller). Small downscales take the direct LANCZOS path; the 2x
+  oversample capped capture at ~10 fps (2026-10-24).
 - Both Hagibis HDMIs always show the same FL2000 stream. Native USB-C HDMI is a separate GPU pipe
   and is unrelated.
 - REG_ACLK bit 28 must stay set (EOF = ZLP) or bulk NAKs forever.
