@@ -39,6 +39,7 @@ def fit_rgb888(
     dst_h: int,
     underscan: float = UNDERSCAN,
     stretch_x: float = 1.0,
+    fast_motion: bool = False,
 ) -> bytes:
     """Scale src into dst with black bars, keeping aspect ratio.
 
@@ -52,6 +53,19 @@ def fit_rgb888(
     _check_fill(underscan, stretch_x)
     if _is_identity_fit(src_w, src_h, dst_w, dst_h, underscan, stretch_x):
         return src
+    if fast_motion:
+        # Full-screen motion favors fresh frames; return to text unsharp when still.
+        canvas = _letterbox_into(
+            src,
+            src_w,
+            src_h,
+            dst_w,
+            dst_h,
+            underscan,
+            stretch_x,
+            resample=Image.Resampling.BILINEAR,
+        )
+        return canvas.filter(ImageFilter.SHARPEN).tobytes()
     if src_w >= dst_w * HIDPI_MIN_SCALE and src_h >= dst_h * HIDPI_MIN_SCALE:
         # Retina: one LANCZOS onto dest. Extra 2x BOX only blurs a 5x source.
         canvas = _letterbox_into(src, src_w, src_h, dst_w, dst_h, underscan, stretch_x)
@@ -88,6 +102,7 @@ def _letterbox_into(
     dst_h: int,
     underscan: float,
     stretch_x: float,
+    resample: Image.Resampling = Image.Resampling.LANCZOS,
 ) -> Image.Image:
     src_img = Image.frombytes("RGB", (src_w, src_h), src)
     inner_w = max(1, int(dst_w * underscan))
@@ -96,7 +111,7 @@ def _letterbox_into(
     scale = min(inner_w * stretch_x / src_w, inner_h / src_h)
     new_w = max(1, int(src_w * scale / stretch_x))
     new_h = max(1, int(src_h * scale))
-    fitted = src_img.resize((new_w, new_h), Image.Resampling.LANCZOS)
+    fitted = src_img.resize((new_w, new_h), resample)
     canvas = Image.new("RGB", (dst_w, dst_h), (0, 0, 0))
     canvas.paste(fitted, ((dst_w - new_w) // 2, (dst_h - new_h) // 2))
     return canvas

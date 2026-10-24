@@ -22,6 +22,7 @@ from fl2000_re.fl2000_usb import FL2000
 from fl2000_re.frame_buffer import new_shared_frame, write_shared_frame
 from fl2000_re.hdmi import bring_up_hdmi
 from fl2000_re.letterbox import UNDERSCAN
+from fl2000_re.motion_capture import MotionCapture
 from fl2000_re.pixels import dword_swap_frame, make_bars_rgb565, pack_frame
 from fl2000_re.registers import BULK_EP
 from fl2000_re.video_modes import MODE_640x480, VideoMode, default_mirror_mode, needs_usb3
@@ -272,6 +273,7 @@ def hdmi_capture_worker(
     grab = (
         grab_main_display_rgb if display_id is None else _grab_display(display_id, include_cursor)
     )
+    motion_capture = MotionCapture(grab, width, height, underscan, stretch_x)
     period = capture_period_s(target_fps) if target_fps else 0.0
     next_tick = time.monotonic()
     mouse_at: tuple[int, int] | None = None
@@ -287,9 +289,12 @@ def hdmi_capture_worker(
             if idle_flag is not None:
                 idle_flag.value = int(period >= pointer_capture_period(IDLE_CAPTURE_FPS) - 1e-9)
         t0 = time.perf_counter()
-        rgb = grab_letterboxed_rgb(
-            width, height, grab=grab, underscan=underscan, stretch_x=stretch_x
-        )
+        rgb = motion_capture()
+        if target_fps and motion_capture.moving:
+            # Video can move while the pointer is parked on another monitor.
+            period = min(period, pointer_capture_period(FLUID_CAPTURE_FPS))
+            if idle_flag is not None:
+                idle_flag.value = 0
         packed = pack_frame(rgb, bpp)
         grab_s = time.perf_counter() - t0
         if grab_ms is not None:
