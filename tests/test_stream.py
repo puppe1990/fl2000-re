@@ -382,12 +382,12 @@ def test_hdmi_capture_worker_paces_itself_to_the_target_fps(monkeypatch):
 def test_hdmi_capture_worker_forwards_fill_params(monkeypatch):
     seen: dict[str, float] = {}
 
-    def fake_grab_letterboxed(width, height, grab=None, underscan=1.0, stretch_x=1.0):
+    def fake_fit(src, src_w, src_h, width, height, underscan, stretch_x, fast_motion=False):
         seen["underscan"] = underscan
         seen["stretch_x"] = stretch_x
         return bytes(width * height * 3)
 
-    monkeypatch.setattr(stream, "grab_letterboxed_rgb", fake_grab_letterboxed)
+    monkeypatch.setattr("fl2000_re.motion_capture.fit_rgb888", fake_fit)
     _run_worker_once(monkeypatch, underscan=1.0, stretch_x=1.1585)
     assert seen == {"underscan": 1.0, "stretch_x": 1.1585}
 
@@ -1101,3 +1101,31 @@ def test_slow_capture_leaves_compositor_headroom(monkeypatch):
     _run_worker_once(monkeypatch, target_fps=60)
     assert periods
     assert min(periods) >= 0.0625 - 1e-9
+
+
+def test_moving_image_escapes_mouse_idle_throttle(monkeypatch):
+    periods = []
+    original = stream._sleep_until_tick
+
+    class MovingCapture:
+        moving = True
+
+        def __init__(self, *args):
+            pass
+
+        def __call__(self):
+            return bytes(64 * 48 * 3)
+
+    def parked(*args, **kwargs):
+        return None, 0.0, 0.2, time.monotonic()
+
+    def record_period(tick, period, now):
+        periods.append(period)
+        return original(tick, period, now)
+
+    monkeypatch.setattr(stream, "MotionCapture", MovingCapture)
+    monkeypatch.setattr(stream, "_retune_from_live_pointer", parked)
+    monkeypatch.setattr(stream, "_sleep_until_tick", record_period)
+    _run_worker_once(monkeypatch, target_fps=20)
+    assert periods
+    assert min(periods) < 0.03

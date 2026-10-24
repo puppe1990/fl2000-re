@@ -159,3 +159,15 @@ def test_small_downscale_resizes_straight_to_the_destination(monkeypatch):
     out = letterbox.fit_rgb888(src, 16, 10, 12, 10, 1.0, 1.0)
     assert calls == [(12, 10)]
     assert len(out) == 12 * 10 * 3
+
+
+def test_motion_filter_preserves_letterbox_and_returns_to_text_path():
+    from fl2000_re.letterbox import fit_rgb888
+    from PIL import Image
+
+    src = bytes([120, 120, 120]) * (80 * 40)
+    rgb = fit_rgb888(src, 80, 40, 40, 40, underscan=1.0, fast_motion=True)
+    image = Image.frombytes("RGB", (40, 40), rgb)
+    assert image.getpixel((20, 0)) == (0, 0, 0)
+    assert image.getpixel((20, 20)) == (120, 120, 120)
+    assert fit_rgb888(src, 80, 40, 80, 40, 1.0, fast_motion=True) is src
