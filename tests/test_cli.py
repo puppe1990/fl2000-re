@@ -81,6 +81,14 @@ def test_cli_mode_accepts_1080p30():
     assert ns.mode == "1920x1080@30"
 
 
+def test_cli_virtual_defaults_to_none():
+    assert build_parser().parse_args(["extend"]).virtual is None
+
+
+def test_cli_virtual_accepts_a_wxh_size():
+    assert build_parser().parse_args(["extend", "--virtual", "1280x800"]).virtual == (1280, 800)
+
+
 def test_cli_v_shift_defaults_to_zero():
     assert build_parser().parse_args(["mirror"]).v_shift == 0
 
@@ -142,7 +150,7 @@ def test_cli_main_forwards_no_cursor(monkeypatch):
     class FakeFL2000:
         pass
 
-    def fake_extend(*args: object) -> int:
+    def fake_extend(*args: object, **_kwargs: object) -> int:
         seen["cursor"] = args[7]
         return 0
 

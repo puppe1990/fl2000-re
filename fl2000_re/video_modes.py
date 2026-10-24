@@ -238,6 +238,23 @@ def resolve_mode(name: str) -> VideoMode:
         raise ValueError(f"unknown mode {name!r}, expected one of: {valid}") from None
 
 
+def parse_size(text: str) -> tuple[int, int]:
+    """Parse a WxH CLI size such as --virtual 1280x800.
+
+    Example: parse_size("1280x800") == (1280, 800)
+    """
+    parts = text.lower().split("x")
+    if len(parts) != 2:
+        raise ValueError(f"size {text!r} is not WxH (expected e.g. '1280x800')")
+    try:
+        width, height = (int(part) for part in parts)
+    except ValueError:
+        raise ValueError(f"size {text!r} is not WxH (expected e.g. '1280x800')") from None
+    if not (1 <= width <= 4096 and 1 <= height <= 4096):
+        raise ValueError(f"size {text!r} is out of range (expected 1..4096 per side)")
+    return width, height
+
+
 def shift_vsync2(v_sync_2: int, lines: int) -> int:
     """Nudge the scanout vertically by moving vstart and start_latency together.
 

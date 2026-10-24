@@ -19,6 +19,9 @@ from fl2000_re.video_modes import MODE_1024x768
 
 LABEL = "com.fl2000-re.extend"
 POLL_S = 2.0
+# 4:3 matches the 1024x768 HDMI raster: a 16:10 desktop would letterbox. The
+# 1.25x downscale draws the UI ~20% smaller without touching the VGA clock.
+VIRTUAL_DESKTOP = (1280, 960)
 BOOTSTRAP_ATTEMPTS = 3
 BOOTSTRAP_RETRY_S = 1.0
 LOG_MAX_BYTES = 2 * 1024 * 1024
@@ -192,7 +195,16 @@ def cmd_extend_agent() -> int:
     # 1024x768@60 is 65 MHz: the highest mode that stays stable through the
     # HDMI->VGA adapter. 720p (74 MHz) already flickers; 1440x900 is unusable.
     return cmd_extend(
-        FL2000(), 0, 1.0, 1.0, MODE_1024x768, 0, "left", True, capture_fps=EXTEND_CAPTURE_FPS
+        FL2000(),
+        0,
+        1.0,
+        1.0,
+        MODE_1024x768,
+        0,
+        "left",
+        True,
+        capture_fps=EXTEND_CAPTURE_FPS,
+        virtual_size=VIRTUAL_DESKTOP,
     )
 
 

@@ -11,6 +11,9 @@ OVERSAMPLE = 2
 # Stronger than photo unsharp: TUI glyphs on 640x480 must survive Dell 2.25x.
 _UNSHARP = ImageFilter.UnsharpMask(radius=1.0, percent=280, threshold=0)
 HIDPI_MIN_SCALE = 4
+# Below 2x the 2x oversample costs more than it adds: 1280x800 -> 1024x768
+# (the --virtual downscale) took 55 ms and capped the capture at ~10 fps.
+DIRECT_MAX_SCALE = 2
 # CEA 480p is a TV mode; the Dell overscans and clips the right edge.
 UNDERSCAN = 0.92
 
@@ -48,6 +51,10 @@ def fit_rgb888(
         return src
     if src_w >= dst_w * HIDPI_MIN_SCALE and src_h >= dst_h * HIDPI_MIN_SCALE:
         # Retina: one LANCZOS onto dest. Extra 2x BOX only blurs a 5x source.
+        canvas = _letterbox_into(src, src_w, src_h, dst_w, dst_h, underscan, stretch_x)
+        return canvas.filter(_UNSHARP).tobytes()
+    if src_w < dst_w * DIRECT_MAX_SCALE and src_h < dst_h * DIRECT_MAX_SCALE:
+        # Small downscale (--virtual 1280x800 -> 1024x768): straight LANCZOS.
         canvas = _letterbox_into(src, src_w, src_h, dst_w, dst_h, underscan, stretch_x)
         return canvas.filter(_UNSHARP).tobytes()
     hi_w, hi_h = dst_w * OVERSAMPLE, dst_h * OVERSAMPLE

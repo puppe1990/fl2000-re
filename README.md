@@ -33,10 +33,15 @@ Plug **one** HDMI cable into the Hagibis. One FL2000 chip = one output.
 .venv/bin/python hagibis_re.py bars --seconds 12 --mode 1440x900
 .venv/bin/python hagibis_re.py mirror --seconds 0
 .venv/bin/python hagibis_re.py extend --seconds 0 --mode 1440x900 --underscan 1.0
+.venv/bin/python hagibis_re.py extend --seconds 0 --mode 1024x768 --underscan 1.0 --virtual 1280x960
 ```
 
 `--mode` is per command: `mirror`/`extend` default to 720×480, `bars` to 640×480. Native modes need
 `--underscan 1.0` (the 0.92 default is analog overscan compensation).
+
+`--virtual WxH` draws the desktop larger and downscales it to the HDMI mode: `1280x960` → `1024x768`
+gives a ~20% smaller UI at the stable 65 MHz clock. Keep the same aspect as the mode, or the fit
+letterboxes (1280×800 → 1024×768 leaves bars top and bottom). The LaunchAgent uses 1280x960.
 
 `mirror` clones the Air. `extend` creates a WindowServer display you can drag windows onto, then
 clones **that** display to HDMI. `CGVirtualDisplay` is a private API and can break on a macOS

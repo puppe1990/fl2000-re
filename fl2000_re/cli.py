@@ -9,7 +9,13 @@ from fl2000_re.letterbox import UNDERSCAN
 from fl2000_re.log_time import install_timestamped_streams
 from fl2000_re.probe import cmd_detect, cmd_dump, cmd_edid
 from fl2000_re.stream import EXTEND_CAPTURE_FPS, cmd_bars, cmd_extend, cmd_mirror
-from fl2000_re.video_modes import NAMED_MODES, MODE_640x480, default_mirror_mode, resolve_mode
+from fl2000_re.video_modes import (
+    NAMED_MODES,
+    MODE_640x480,
+    default_mirror_mode,
+    parse_size,
+    resolve_mode,
+)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -55,6 +61,12 @@ def build_parser() -> argparse.ArgumentParser:
         type=int,
         default=0,
         help="desloca a imagem verticalmente em linhas (negativo = cima)",
+    )
+    ap.add_argument(
+        "--virtual",
+        type=parse_size,
+        default=None,
+        help="tamanho da tela virtual (ex. 1280x800); o HDMI continua no --mode",
     )
     ap.add_argument(
         "--place",
@@ -111,6 +123,7 @@ def main() -> int:
             args.place,
             args.cursor,
             args.capture_fps,
+            virtual_size=args.virtual,
         )
     if args.cmd == "monitor-log":
         from fl2000_re.status_log import cmd_monitor_log
