@@ -10,6 +10,9 @@ from PIL import Image, ImageFilter
 OVERSAMPLE = 2
 # Stronger than photo unsharp: TUI glyphs on 640x480 must survive Dell 2.25x.
 _UNSHARP = ImageFilter.UnsharpMask(radius=1.0, percent=280, threshold=0)
+# 1280x960 -> 1024x768 (0.8x) thins 1x glyph strokes; a tighter radius at higher
+# gain sharpens edges without the halos a 0.5/450 pass paints (2026-10-24).
+_UNSHARP_TEXT = ImageFilter.UnsharpMask(radius=0.7, percent=350, threshold=2)
 HIDPI_MIN_SCALE = 4
 # Below 2x the 2x oversample costs more than it adds: 1280x800 -> 1024x768
 # (the --virtual downscale) took 55 ms and capped the capture at ~10 fps.
@@ -54,9 +57,9 @@ def fit_rgb888(
         canvas = _letterbox_into(src, src_w, src_h, dst_w, dst_h, underscan, stretch_x)
         return canvas.filter(_UNSHARP).tobytes()
     if src_w < dst_w * DIRECT_MAX_SCALE and src_h < dst_h * DIRECT_MAX_SCALE:
-        # Small downscale (--virtual 1280x800 -> 1024x768): straight LANCZOS.
+        # Small downscale (--virtual 1280x960 -> 1024x768): straight LANCZOS.
         canvas = _letterbox_into(src, src_w, src_h, dst_w, dst_h, underscan, stretch_x)
-        return canvas.filter(_UNSHARP).tobytes()
+        return canvas.filter(_UNSHARP_TEXT).tobytes()
     hi_w, hi_h = dst_w * OVERSAMPLE, dst_h * OVERSAMPLE
     hi = _letterbox_into(src, src_w, src_h, hi_w, hi_h, underscan, stretch_x)
     out = hi.resize((dst_w, dst_h), Image.Resampling.BOX)

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import contextlib
 import multiprocessing as mp
+import os
 import time
 
 import usb.core
@@ -345,6 +346,21 @@ def _grab_display(display_id: int, include_cursor: bool = True) -> Grabber:
     return lambda: grab_cg_display_rgb(display_id, include_cursor=include_cursor)
 
 
+def lower_capture_priority(nice: int = 5) -> None:
+    """Give the 60 Hz USB pump priority over the capture child.
+
+    The child spends ~50 ms per frame at 1280x960; nice(5) keeps the pump from
+    missing ticks when a grab spikes. Example: lower_capture_priority()
+    """
+    with contextlib.suppress(OSError):
+        os.nice(nice)
+
+
+def _capture_child(*args) -> None:
+    lower_capture_priority()
+    hdmi_capture_worker(*args)
+
+
 class CaptureProcess:
     """Owns the capture child and its shared frame so a dead child can be respawned.
 
@@ -382,7 +398,7 @@ class CaptureProcess:
 
     def start(self) -> None:
         self._baseline = self.counter.value
-        self.proc = mp.Process(target=hdmi_capture_worker, args=self._worker_args(), daemon=True)
+        self.proc = mp.Process(target=_capture_child, args=self._worker_args(), daemon=True)
         self.proc.start()
 
     def _worker_args(self) -> tuple:
