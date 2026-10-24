@@ -8,6 +8,7 @@ import numpy as np
 
 from fl2000_re.capture import Grabber
 from fl2000_re.letterbox import fit_rgb888
+from fl2000_re.motion_scaler import MotionScaler
 
 MOTION_HOLD_S = 0.5
 MOTION_PIXEL_DELTA = 24
@@ -31,10 +32,39 @@ class MotionCapture:
         self.previous_size: tuple[int, int] | None = None
         self.motion_until = 0.0
         self.moving = False
+        self.scaler = MotionScaler()
+        self.cached = False
+        self._previous_rgb: bytes | None = None
+        self._previous_moving = False
+        self._fitted: bytes | None = None
+        self.capture_ms = self.scale_ms = 0.0
 
     def __call__(self) -> bytes:
+        start = time.perf_counter()
         rgb, width, height = self.grab()
+        self.capture_ms = (time.perf_counter() - start) * 1000
+        start = time.perf_counter()
+        same_size = self.previous_size == (width, height)
         self.observe(rgb, width, height, time.monotonic())
+        self.cached = (
+            same_size and rgb == self._previous_rgb and self.moving == self._previous_moving
+        )
+        if not self.cached:
+            self._fitted = self._fit(rgb, width, height)
+        self._previous_rgb, self._previous_moving = rgb, self.moving
+        self.scale_ms = (time.perf_counter() - start) * 1000
+        assert self._fitted is not None
+        return self._fitted
+
+    def _fit(self, rgb: bytes, width: int, height: int) -> bytes:
+        exact_raster = self.underscan == 1.0 and self.stretch_x == 1.0
+        same_aspect = width * self.height == height * self.width
+        identity = (width, height) == (self.width, self.height)
+        if self.moving and exact_raster and same_aspect and not identity:
+            native = self.scaler.resize(rgb, width, height, self.width, self.height)
+            if native is not None:
+                return native
+        self.scaler.backend = "pillow"
         return fit_rgb888(
             rgb,
             width,

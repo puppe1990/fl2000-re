@@ -171,11 +171,27 @@ def test_rotate_extend_log_leaves_a_small_file(tmp_path: Path):
     assert not path.with_name("fl2000-re-extend.log.old").exists()
 
 
-def test_rotate_extend_log_moves_a_huge_file_aside(tmp_path: Path):
+def test_rotate_extend_log_keeps_live_path_and_archives_contents(tmp_path: Path):
     from fl2000_re.launch_agent import rotate_extend_log
 
     path = tmp_path / "fl2000-re-extend.log"
     path.write_bytes(b"x" * 200)
     rotate_extend_log(path, max_bytes=100)
-    assert not path.exists()
+    assert path.read_bytes() == b""
     assert path.with_name("fl2000-re-extend.log.old").read_bytes() == b"x" * 200
+
+
+def test_rotation_keeps_launchd_open_stdout_writing_to_live_log(tmp_path: Path):
+    from fl2000_re.launch_agent import rotate_extend_log
+
+    path = tmp_path / "extend.log"
+    with path.open("a") as writer:
+        writer.write("before\n")
+        writer.flush()
+        original_inode = path.stat().st_ino
+        rotate_extend_log(path, max_bytes=1)
+        writer.write("after\n")
+        writer.flush()
+    assert path.stat().st_ino == original_inode
+    assert path.read_text() == "after\n"
+    assert path.with_name("extend.log.old").read_text() == "before\n"

@@ -5,7 +5,9 @@ import threading
 import time
 import types
 
+import fl2000_re.capture_worker as capture_worker
 import fl2000_re.stream as stream
+import fl2000_re.stream_metrics as stream_metrics
 import pytest
 from fl2000_re.fl2000_usb import FL2000
 from fl2000_re.registers import BULK_EP
@@ -314,9 +316,10 @@ def _run_worker_once(
     src: bytes | None = None,
     run_s: float = 0.0,
     target_fps: int | None = None,
+    capture_metrics=None,
 ):
     src = bytes([255, 0, 0]) * (width * height) if src is None else src
-    monkeypatch.setattr(stream, "grab_main_display_rgb", lambda: (src, width, height))
+    monkeypatch.setattr(capture_worker, "grab_main_display_rgb", lambda: (src, width, height))
     monkeypatch.setattr("fl2000_re.cursor_overlay.mouse_global_xy", lambda: (0.0, 0.0))
     n = width * height * bpp
     shm = mp.Array("B", n, lock=False)
@@ -338,6 +341,9 @@ def _run_worker_once(
             True,
             None,
             target_fps,
+            None,
+            mp.Lock(),
+            capture_metrics,
         ),
         daemon=True,
     )
@@ -393,7 +399,7 @@ def test_hdmi_capture_worker_forwards_fill_params(monkeypatch):
 
 
 def test_capture_process_restart_respects_budget(monkeypatch, capsys):
-    monkeypatch.setattr(stream.mp, "Process", FakeProcess)
+    monkeypatch.setattr(mp, "Process", FakeProcess)
     capture = stream.CaptureProcess(
         bytes(512), MODE_640x480, None, 1.0, 1.0, False, restarts_left=2
     )
@@ -433,10 +439,10 @@ def test_capture_process_starts_the_child_paced_to_the_mode_refresh(monkeypatch)
             super().__init__(**kwargs)
             seen["args"] = kwargs["args"]
 
-    monkeypatch.setattr(stream.mp, "Process", RecordingProcess)
+    monkeypatch.setattr(mp, "Process", RecordingProcess)
     capture = stream.CaptureProcess(bytes(512), MODE_640x480, None, 1.0, 1.0, False)
     capture.start()
-    assert seen["args"][-3] == MODE_640x480.freq
+    assert seen["args"][-4] == MODE_640x480.freq
     capture.stop_and_join()
 
 
@@ -449,12 +455,12 @@ def test_capture_process_can_pace_below_the_usb_refresh(monkeypatch):
             super().__init__(**kwargs)
             seen["args"] = kwargs["args"]
 
-    monkeypatch.setattr(stream.mp, "Process", RecordingProcess)
+    monkeypatch.setattr(mp, "Process", RecordingProcess)
     capture = stream.CaptureProcess(
         bytes(512), MODE_640x480, None, 1.0, 1.0, False, capture_fps=stream.EXTEND_CAPTURE_FPS
     )
     capture.start()
-    assert seen["args"][-3] == stream.EXTEND_CAPTURE_FPS
+    assert seen["args"][-4] == stream.EXTEND_CAPTURE_FPS
     assert stream.EXTEND_CAPTURE_FPS == 20
     capture.stop_and_join()
 
@@ -489,7 +495,7 @@ def test_capture_worker_exit_message_none_and_nonzero():
 
 def test_pace_clone_gives_up_after_restart_budget(monkeypatch, capsys):
     fl = FL2000(dev=FakeBulkDevice())
-    monkeypatch.setattr(stream.mp, "Process", SegfaultedCaptureProcess)
+    monkeypatch.setattr(mp, "Process", SegfaultedCaptureProcess)
     monkeypatch.setattr(stream, "release_bulk", lambda _fl: None)
     assert stream._pace_clone(fl, bytes(512), MODE_640x480, None, 0.05, restart_budget=1) == 1
     out = capsys.readouterr().out
@@ -511,7 +517,7 @@ def test_pace_clone_respawns_dead_capture_and_keeps_streaming(monkeypatch, capsy
             RevivedCaptureProcess.alive_after_restart = True
         return RevivedCaptureProcess(**kwargs)
 
-    monkeypatch.setattr(stream.mp, "Process", factory)
+    monkeypatch.setattr(mp, "Process", factory)
     monkeypatch.setattr(stream, "release_bulk", lambda _fl: None)
     rc = stream._pace_clone(fl, bytes(512), MODE_640x480, None, 0.1, restart_budget=2)
     assert rc == 0
@@ -572,7 +578,7 @@ def test_ensure_capture_allows_slow_first_frame(capsys):
 
 
 def test_capture_process_has_frame_tracks_counter(monkeypatch):
-    monkeypatch.setattr(stream.mp, "Process", FakeProcess)
+    monkeypatch.setattr(mp, "Process", FakeProcess)
     capture = stream.CaptureProcess(bytes(512), MODE_640x480, None, 1.0, 1.0, False)
     assert capture.has_frame() is False
     capture.start()
@@ -616,7 +622,7 @@ class TickingCapture:
 
 def test_pump_reports_capture_fps_when_counter_advances(monkeypatch, capsys):
     """Regression: the stall watchdog must not consume the stats counter delta."""
-    monkeypatch.setattr(stream, "STATS_INTERVAL_S", 0.0)
+    monkeypatch.setattr(stream_metrics, "STATS_INTERVAL_S", 0.0)
     fl = FL2000(dev=FakeBulkDevice())
     sent = stream._pump_paced_frames(
         fl, TickingCapture(), MODE_640x480, 0.05, time.monotonic(), "estendendo", False
@@ -725,7 +731,7 @@ def test_hdmi_capture_worker_honors_no_cursor(monkeypatch):
         seen["include_cursor"] = include_cursor
         return bytes([1, 2, 3]) * (64 * 48), 64, 48
 
-    monkeypatch.setattr(stream, "grab_cg_display_rgb", fake_grab_cg)
+    monkeypatch.setattr(capture_worker, "grab_cg_display_rgb", fake_grab_cg)
     n = 64 * 48 * 2
     shm = mp.Array("B", n, lock=False)
     counter = mp.Value("i", 0)
@@ -753,7 +759,7 @@ def test_hdmi_capture_worker_requests_cursor_on_virtual_display(monkeypatch):
         seen["include_cursor"] = include_cursor
         return bytes([1, 2, 3]) * (64 * 48), 64, 48
 
-    monkeypatch.setattr(stream, "grab_cg_display_rgb", fake_grab_cg)
+    monkeypatch.setattr(capture_worker, "grab_cg_display_rgb", fake_grab_cg)
     n = 64 * 48 * 2
     shm = mp.Array("B", n, lock=False)
     counter = mp.Value("i", 0)
@@ -822,8 +828,8 @@ def _stub_extend_preview(monkeypatch, tmp_path):
         return handle
 
     monkeypatch.setattr("fl2000_re.virtual_display.spawn_virtual_display", fake_spawn)
-    monkeypatch.setattr(stream, "grab_cg_display_rgb", boom_cg)
-    monkeypatch.setattr(stream, "grab_main_display_rgb", boom_main)
+    monkeypatch.setattr(capture_worker, "grab_cg_display_rgb", boom_cg)
+    monkeypatch.setattr(capture_worker, "grab_main_display_rgb", boom_main)
     monkeypatch.setattr(stream, "grab_via_screencapture", fake_preview)
     monkeypatch.setattr(stream, "bring_up_hdmi", fake_bring_up)
     monkeypatch.setattr(stream, "_pace_clone", fake_pace)
@@ -872,12 +878,12 @@ def test_cmd_extend_defaults_cursor_on_into_pace(monkeypatch, tmp_path):
 def test_cmd_mirror_preview_never_calls_mss(monkeypatch, tmp_path):
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(
-        stream,
+        capture_worker,
         "grab_main_display_rgb",
         lambda: (_ for _ in ()).throw(AssertionError("mss primary in USB process")),
     )
     monkeypatch.setattr(
-        stream,
+        capture_worker,
         "grab_cg_display_rgb",
         lambda *_a, **_k: (_ for _ in ()).throw(AssertionError("mss cg in USB process")),
     )
@@ -969,7 +975,7 @@ def test_wall_minus_uptime_gap_is_sleep_duration():
 def test_pace_clone_exits_after_sleep_wake(monkeypatch, capsys):
     """macOS sleep leaves the process alive with a dead HDMI; exit so KeepAlive restarts."""
     fl = FL2000(dev=FakeBulkDevice())
-    monkeypatch.setattr(stream.mp, "Process", FakeProcess)
+    monkeypatch.setattr(mp, "Process", FakeProcess)
     monkeypatch.setattr(stream, "release_bulk", lambda _fl: None)
 
     class JumpClocks:
@@ -990,7 +996,7 @@ def test_pace_clone_exits_after_sleep_wake(monkeypatch, capsys):
 
 def test_pace_clone_streams_paced_without_relying_on_capture(monkeypatch):
     fl = FL2000(dev=FakeBulkDevice())
-    monkeypatch.setattr(stream.mp, "Process", FakeProcess)
+    monkeypatch.setattr(mp, "Process", FakeProcess)
     monkeypatch.setattr(stream, "release_bulk", lambda _fl: None)
     assert stream._pace_clone(fl, bytes(512), MODE_640x480, None, 0.1) == 0
     assert fl.dev.packets
@@ -1045,20 +1051,20 @@ def test_cmd_bars_streams_the_requested_mode(monkeypatch):
 
 def test_lower_capture_priority_calls_nice(monkeypatch):
     seen = []
-    monkeypatch.setattr(stream.os, "nice", lambda n: seen.append(n))
+    monkeypatch.setattr(capture_worker.os, "nice", lambda n: seen.append(n))
     stream.lower_capture_priority()
     assert seen == [5]
 
 
 def test_lower_capture_priority_tolerates_oserror(monkeypatch):
-    monkeypatch.setattr(stream.os, "nice", lambda _n: (_ for _ in ()).throw(OSError()))
+    monkeypatch.setattr(capture_worker.os, "nice", lambda _n: (_ for _ in ()).throw(OSError()))
     stream.lower_capture_priority()
 
 
 def test_capture_child_lowers_priority_before_grabbing(monkeypatch):
     calls = []
-    monkeypatch.setattr(stream, "lower_capture_priority", lambda: calls.append("nice"))
-    monkeypatch.setattr(stream, "hdmi_capture_worker", lambda *a: calls.append("worker"))
+    monkeypatch.setattr(capture_worker, "lower_capture_priority", lambda: calls.append("nice"))
+    monkeypatch.setattr(capture_worker, "hdmi_capture_worker", lambda *a: calls.append("worker"))
     stream._capture_child(1, 2, 3)
     assert calls == ["nice", "worker"]
 
@@ -1068,6 +1074,7 @@ def test_snapshot_reuses_complete_frame_while_writer_is_busy():
     capture.frame_lock.acquire()
     try:
         capture.buffer()[0] = 99
+        capture.counter.value += 1
         assert capture.snapshot() == bytes(512)
     finally:
         capture.frame_lock.release()
@@ -1088,6 +1095,7 @@ def test_restart_replaces_lock_left_owned_by_dead_writer():
 
 
 def test_slow_capture_leaves_compositor_headroom(monkeypatch):
+    monkeypatch.setattr(capture_worker, "capture_backoff_s", lambda grab_s: 0.0)
     periods = []
     clock = iter(i * 0.05 for i in range(10000))
     monkeypatch.setattr(stream.time, "perf_counter", lambda: next(clock))
@@ -1097,7 +1105,7 @@ def test_slow_capture_leaves_compositor_headroom(monkeypatch):
         periods.append(period)
         return original(tick, period, now)
 
-    monkeypatch.setattr(stream, "_sleep_until_tick", record_period)
+    monkeypatch.setattr(capture_worker, "_sleep_until_tick", record_period)
     _run_worker_once(monkeypatch, target_fps=60)
     assert periods
     assert min(periods) >= 0.0625 - 1e-9
@@ -1123,9 +1131,110 @@ def test_moving_image_escapes_mouse_idle_throttle(monkeypatch):
         periods.append(period)
         return original(tick, period, now)
 
-    monkeypatch.setattr(stream, "MotionCapture", MovingCapture)
-    monkeypatch.setattr(stream, "_retune_from_live_pointer", parked)
-    monkeypatch.setattr(stream, "_sleep_until_tick", record_period)
+    monkeypatch.setattr(capture_worker, "MotionCapture", MovingCapture)
+    monkeypatch.setattr(capture_worker, "_retune_from_live_pointer", parked)
+    monkeypatch.setattr(capture_worker, "_sleep_until_tick", record_period)
     _run_worker_once(monkeypatch, target_fps=20)
     assert periods
     assert min(periods) < 0.03
+
+
+def test_snapshot_reuses_bytes_until_capture_generation_changes():
+    capture = stream.CaptureProcess(bytes(512), MODE_640x480, None, 1.0, 1.0, False)
+    assert capture.snapshot() is capture._last_complete_frame
+    assert not capture.snapshot_fresh
+    capture.buffer()[0] = 7
+    capture.counter.value += 1
+    capture.metrics.values[9] = 12.0
+    first = capture.snapshot()
+    assert first[0] == 7
+    assert capture.snapshot_fresh
+    assert capture.frame_at == 12.0
+    assert capture.snapshot() is first
+    assert not capture.snapshot_fresh
+
+
+def test_idle_capture_does_not_hide_usb_starvation():
+    line = stream.format_stream_stats("estendendo", 5, 25, 10, True, parked=True)
+    assert "gargalo: USB" in line
+
+
+def test_scale_limit_does_not_recommend_disabling_cursor():
+    from fl2000_re.stream_metrics import CaptureTimings
+
+    timings = CaptureTimings(10, 40, 3, 60, 15, "movimento")
+    line = stream.format_stream_stats("estendendo", 15, 60, 53, True, timings=timings)
+    assert "limite: escala" in line
+    assert "--no-cursor" not in line
+    assert "pipeline" in line
+
+
+def test_stats_include_stages_and_effective_capture_target(capsys):
+    from fl2000_re.stream_metrics import CaptureTimings, PumpMetrics, SharedCaptureMetrics
+
+    metrics = SharedCaptureMetrics()
+    metrics.record(CaptureTimings(10, 9, 2, 60, 38, "movimento", "vimage"), 0.8)
+    pump = PumpMetrics(60)
+    pump.record(0.9, 0.905, True, 0.8)
+    stream._maybe_print_stats(
+        1.1,
+        0,
+        0,
+        0,
+        60,
+        types.SimpleNamespace(value=38),
+        types.SimpleNamespace(value=21),
+        "estendendo",
+        True,
+        60,
+        pump_metrics=pump,
+        capture_metrics=metrics,
+    )
+    line = capsys.readouterr().out
+    assert "modo movimento/vimage" in line
+    assert "orcamento 38.0 fps" in line
+    assert "etapas captura/escala/pack 10.0/9.0/2.0ms" in line
+
+
+def test_unchanged_worker_frames_reuse_packing_and_keep_watchdog_alive(monkeypatch):
+    from fl2000_re.stream_metrics import SharedCaptureMetrics
+
+    calls = []
+    metrics = SharedCaptureMetrics()
+    monkeypatch.setattr(
+        capture_worker, "pack_frame", lambda rgb, bpp: calls.append(rgb) or bytes(64 * 48 * 2)
+    )
+    _, count = _run_worker_once(monkeypatch, run_s=0.15, target_fps=60, capture_metrics=metrics)
+    assert count >= 2
+    assert len(calls) == 1
+    assert metrics.read().cached
+    assert metrics.values[9] > 0
+
+
+def test_interrupted_stream_reports_frames_already_sent(monkeypatch, capsys):
+    monkeypatch.setattr(mp, "Process", FakeProcess)
+    monkeypatch.setattr(stream, "release_bulk", lambda fl: None)
+
+    def interrupted(fl, capture, *args):
+        capture.sent_frames = 42
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(stream, "_pump_paced_frames", interrupted)
+    assert stream._pace_clone(FL2000(dev=FakeBulkDevice()), bytes(512), MODE_640x480, None, 1) == 0
+    assert "42 frames" in capsys.readouterr().out
+
+
+def test_measured_pipeline_does_not_guess_cursor_is_the_cause():
+    from fl2000_re.stream_metrics import CaptureTimings
+
+    line = stream.format_stream_stats(
+        "estendendo",
+        20,
+        60,
+        16,
+        True,
+        capture_target_fps=51,
+        timings=CaptureTimings(15, 0.5, 0, 60, 51, "movimento", cached=True),
+    )
+    assert "gargalo: captura" in line
+    assert "--no-cursor" not in line

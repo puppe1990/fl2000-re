@@ -6,6 +6,7 @@ Example: cmd_install_agent(now=False)
 from __future__ import annotations
 
 import os
+import shutil
 import subprocess
 import time
 from collections.abc import Callable
@@ -173,7 +174,10 @@ def rotate_extend_log(path: Path, max_bytes: int = LOG_MAX_BYTES) -> None:
         return
     bak = path.with_name(path.name + ".old")
     bak.unlink(missing_ok=True)
-    path.replace(bak)
+    # launchd keeps stdout open: renaming would keep writing into .old forever.
+    shutil.copyfile(path, bak)
+    with path.open("wb"):
+        pass
 
 
 def cmd_extend_agent() -> int:

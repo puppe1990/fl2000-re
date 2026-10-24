@@ -44,14 +44,26 @@ gives a ~20% smaller UI at the stable 65 MHz clock. Keep the same aspect as the 
 letterboxes (1280×800 → 1024×768 leaves bars top and bottom). The LaunchAgent uses 1280x960.
 
 Capture follows screen motion as well as the pointer: changing more than 8% of a sampled frame keeps
-video active even with a parked mouse. During motion, scaling uses BILINEAR plus SHARPEN to reduce
-latency; after 0.5 s without significant changes, the text LANCZOS/unsharp filter returns. HDMI
-continues receiving frames at the mode refresh, including repeated frames. This is adaptive capture,
-not a guarantee of 60 distinct video frames per second.
+video active even with a parked mouse. During motion, full-raster resizing uses macOS Accelerate
+vImage scaling and sharpening. Other platforms, unavailable native acceleration, letterboxing and
+underscan use the BILINEAR/SHARPEN fallback. After 0.5 s without significant changes, the text
+LANCZOS/unsharp filter returns. Identical captures reuse fitted and packed pixels. HDMI continues
+receiving frames at the mode refresh, including repeated frames. This is adaptive capture, not a
+guarantee of 60 distinct video frames per second.
 
 `mirror` clones the Air. `extend` creates a WindowServer display you can drag windows onto, then
 clones **that** display to HDMI. `CGVirtualDisplay` is a private API and can break on a macOS
 update. Run `extend` from Terminal.app with Screen Recording permission.
+
+The live log separates capture, scaling and packing costs, reports the requested and budget-limited
+capture rates, and counts delivered captures (`novas`) separately from USB repeats (`repetidas`).
+`novas` counts consumed capture generations, including captures of unchanged content; it does not
+measure distinct video frames. `pausa-max` and `atrasos` expose send gaps over 1.5 refresh periods;
+`USB-max` measures the longest write including its ZLP, while `idade-max` measures age since the
+capture call started, excluding compositor and monitor latency. Stage costs and targets are the
+latest sample, while USB counts and maxima cover the previous reporting interval. `cache sim` means
+unchanged raw pixels reused the previous fitted image. The log also identifies the native or Pillow
+filter and any compositor backoff. Log rotation preserves launchd's open stdout file.
 
 Code lives in `fl2000_re/` (one module per concern). `hagibis_re.py` is the CLI shim. Agent rules:
 `AGENTS.md`.
