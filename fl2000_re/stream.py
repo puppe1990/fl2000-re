@@ -24,6 +24,7 @@ from fl2000_re.capture_pacing import (
     FLUID_CAPTURE_FPS as FLUID_CAPTURE_FPS,
 )
 from fl2000_re.capture_pacing import IDLE_CAPTURE_FPS as IDLE_CAPTURE_FPS
+from fl2000_re.capture_pacing import USB_FEED_LEAD, usb_feed_period_s
 from fl2000_re.capture_pacing import (
     _sleep_until_tick as _sleep_until_tick,
 )
@@ -72,6 +73,7 @@ from fl2000_re.registers import BULK_EP
 from fl2000_re.stream_metrics import PumpMetrics
 from fl2000_re.stream_metrics import _maybe_print_stats as _maybe_print_stats
 from fl2000_re.stream_metrics import format_stream_stats as format_stream_stats
+from fl2000_re.thread_priority import prioritize_usb_thread
 from fl2000_re.video_modes import MODE_640x480, VideoMode, default_mirror_mode, needs_usb3
 
 TARGET_FPS = 60
@@ -338,6 +340,10 @@ def _pace_clone(
         capture_fps=capture_fps,
     )
     capture.start()
+    qos = "ativa" if prioritize_usb_thread() else "indisponivel"
+    print(
+        f"  prioridade interativa da thread USB: {qos}; margem de envio {(USB_FEED_LEAD - 1) * 100:.0f}%."
+    )
     cursor_txt = "ligado (mss+blit)" if cursor else "desligado (--no-cursor)"
     print(f"  {label} — cursor {cursor_txt}. Ctrl+C para parar. Olhe o HDMI do HAGIBIS.")
     t0 = time.monotonic()
@@ -382,7 +388,7 @@ def _pump_paced_frames(
     # blanks/resyncs (screen off/on). Never skip ticks, even unchanged.
     sent = 0
     end_at = None if seconds <= 0 else t0 + seconds
-    period = frame_period_s(mode.freq)
+    period = usb_feed_period_s(mode.freq)
     next_tick = t0
     last_log, last_sent = t0, 0
     stat_cap = capture.counter.value

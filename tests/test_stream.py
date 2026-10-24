@@ -15,6 +15,11 @@ from fl2000_re.stream import capture_period_s, frame_period_s, send_frame
 from fl2000_re.video_modes import MODE_640x480, MODE_1024x768
 
 
+@pytest.fixture(autouse=True)
+def avoid_native_qos_changes(monkeypatch):
+    monkeypatch.setattr(stream, "prioritize_usb_thread", lambda: False)
+
+
 class FakeBulkDevice:
     """Records every bulk packet so ZLP behaviour is observable."""
 
@@ -1238,3 +1243,33 @@ def test_measured_pipeline_does_not_guess_cursor_is_the_cause():
     )
     assert "gargalo: captura" in line
     assert "--no-cursor" not in line
+
+
+def test_usb_feed_leaves_margin_without_changing_hdmi_refresh():
+    from fl2000_re.capture_pacing import usb_feed_period_s
+
+    assert usb_feed_period_s(60) == pytest.approx(1 / 63)
+    assert usb_feed_period_s(30) == pytest.approx(1 / 31.5)
+    assert frame_period_s(60) == pytest.approx(1 / 60)
+    with pytest.raises(ValueError, match="freq=0"):
+        usb_feed_period_s(0)
+
+
+def test_pump_uses_feed_headroom_and_still_sends_every_frame(monkeypatch):
+    from fl2000_re.capture_pacing import usb_feed_period_s
+
+    periods = []
+    original = stream._sleep_until_tick
+
+    def record_period(tick, period, now):
+        periods.append(period)
+        return original(tick, period, now)
+
+    monkeypatch.setattr(stream, "_sleep_until_tick", record_period)
+    fl = FL2000(dev=FakeBulkDevice())
+    sent = stream._pump_paced_frames(
+        fl, TickingCapture(), MODE_640x480, 0.05, time.monotonic(), "estendendo", False
+    )
+    assert sent == len(periods) > 1
+    assert periods == pytest.approx([usb_feed_period_s(60)] * sent)
+    assert len(fl.dev.packets) == sent * 2

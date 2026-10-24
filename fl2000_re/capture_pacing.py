@@ -13,6 +13,7 @@ HEAVY_GRAB_S = 0.080
 MAX_BACKOFF_S = 2.0
 # Lead avoids aliasing a capture onto a frame the pump already sent.
 CAPTURE_LEAD = 1.15
+USB_FEED_LEAD = 1.05
 
 
 def frame_period_s(freq: int) -> float:
@@ -138,3 +139,13 @@ def _sleep_until_tick(next_tick: float, period: float, now: float) -> float:
     if delay < -period:
         return now
     return next_tick
+
+
+def usb_feed_period_s(freq: int) -> float:
+    """Leave scheduling headroom before scanout consumes the next USB frame.
+
+    Exact-refresh sleeps can arrive late after scheduler jitter and USB waits.
+    This changes the host's feed cadence, never the HDMI timing registers.
+    Example: usb_feed_period_s(60) < frame_period_s(60)
+    """
+    return frame_period_s(freq) / USB_FEED_LEAD

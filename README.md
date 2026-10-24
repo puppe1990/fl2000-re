@@ -55,6 +55,12 @@ guarantee of 60 distinct video frames per second.
 clones **that** display to HDMI. `CGVirtualDisplay` is a private API and can break on a macOS
 update. Run `extend` from Terminal.app with Screen Recording permission.
 
+The USB feeder requests interactive thread scheduling on macOS after starting the capture child
+(which keeps nice(5)). Host pacing includes 5% scheduling headroom while HDMI timing registers
+remain unchanged; every frame still ends with its mandatory ZLP. Startup logs whether interactive
+thread priority was accepted and the feed margin. This reduces sensitivity to scheduler delays but
+does not guarantee a stable physical HDMI/VGA signal.
+
 The live log separates capture, scaling and packing costs, reports the requested and budget-limited
 capture rates, and counts delivered captures (`novas`) separately from USB repeats (`repetidas`).
 `novas` counts consumed capture generations, including captures of unchanged content; it does not
