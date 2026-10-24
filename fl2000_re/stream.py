@@ -259,6 +259,7 @@ def hdmi_capture_worker(
     grab_ms=None,
     target_fps: int | None = None,
     idle_flag=None,
+    frame_lock=None,
 ) -> None:
     """Fill shm with a packed HDMI frame; never touches USB.
 
@@ -295,14 +296,15 @@ def hdmi_capture_worker(
             grab_ms.value = grab_s * 1000
         if len(packed) != n:
             continue
-        write_shared_frame(buf, packed)
-        counter.value += 1
+        with frame_lock if frame_lock is not None else contextlib.nullcontext():
+            write_shared_frame(buf, packed)
+            counter.value += 1
         extra = capture_backoff_s(grab_s)
         if extra:
             time.sleep(extra)
             next_tick = time.monotonic()
         elif period:
-            next_tick = _sleep_until_tick(next_tick, period, time.monotonic())
+            next_tick = _sleep_until_tick(next_tick, max(period, grab_s * 1.25), time.monotonic())
 
 
 def _retune_from_live_pointer(
@@ -389,6 +391,8 @@ class CaptureProcess:
         self._capture_fps = mode.freq if capture_fps is None else capture_fps
         self.n = len(frame)
         self.shm = new_shared_frame(frame)
+        self.frame_lock = mp.Lock()
+        self._last_complete_frame = frame
         self.counter = mp.Value("i", 1)
         self.grab_ms = mp.Value("d", 0.0)
         self.idle = mp.Value("i", 0)
@@ -417,6 +421,7 @@ class CaptureProcess:
             self.grab_ms,
             self._capture_fps,
             self.idle,
+            self.frame_lock,
         )
 
     def alive(self) -> bool:
@@ -431,6 +436,19 @@ class CaptureProcess:
 
     def buffer(self):
         return self.shm.get_obj() if hasattr(self.shm, "get_obj") else self.shm
+
+    def snapshot(self) -> bytes:
+        """Copy a complete frame without delaying USB if the writer is busy.
+
+        Example: send_frame(fl, capture.snapshot())
+        """
+        if not self.frame_lock.acquire(block=False):
+            return self._last_complete_frame
+        try:
+            self._last_complete_frame = bytes(self.buffer())
+        finally:
+            self.frame_lock.release()
+        return self._last_complete_frame
 
     def restart(self) -> bool:
         if self._restarts_left <= 0:
@@ -449,6 +467,8 @@ class CaptureProcess:
         with contextlib.suppress(Exception):
             self.proc.join(timeout=1)
         self.proc = None
+        # A terminated writer may have owned the old lock; never reuse it.
+        self.frame_lock = mp.Lock()
 
     def stop_and_join(self, timeout: float = 1.0) -> None:
         self.stop.set()
@@ -736,7 +756,7 @@ def _pump_paced_frames(
             raise CaptureDeadError(
                 "captura nao se recuperou; saindo para o LaunchAgent religar o extend."
             )
-        send_frame(fl, bytes(capture.buffer()))
+        send_frame(fl, capture.snapshot())
         sent += 1
         now = time.monotonic()
         last_log, last_sent, stat_cap = _maybe_print_stats(
