@@ -134,6 +134,15 @@ def test_fit_keeps_left_edge_when_source_is_wider_than_2x_dest():
     assert max(out) > 100
 
 
+def test_small_downscale_uses_the_tighter_text_sharpen():
+    """1280x960 -> 1024x768 thins glyphs; 0.7/350/2 beats 0.5/450, which halos."""
+    import fl2000_re.letterbox as letterbox
+    from PIL import ImageFilter
+
+    assert isinstance(letterbox._UNSHARP_TEXT, ImageFilter.UnsharpMask)
+    assert (letterbox._UNSHARP_TEXT.radius, letterbox._UNSHARP_TEXT.percent) == (0.7, 350)
+
+
 def test_small_downscale_resizes_straight_to_the_destination(monkeypatch):
     """--virtual 1280x800 -> 1024x768: direct LANCZOS (32 ms) beats the 2x path (55 ms)."""
     import fl2000_re.letterbox as letterbox

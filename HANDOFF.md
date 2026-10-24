@@ -65,6 +65,9 @@ Outros achados:
   ~20% menor). Tem que ser a **mesma proporção** do modo, senão letterboxa (1280x800 → 1024x768
   deixa barras em cima/embaixo). O downscale pequeno usa LANCZOS direto; o caminho 2x custava 55 ms
   e limitava a captura a ~10 fps (com o fast path fica ~20 fps). O LaunchAgent usa 1280x960.
+- **Legibilidade e jitter**: o downscale pequeno leva unsharp 0.7/350/2 (mais nítido que o 1.0/280,
+  sem os halos do 0.5/450). O filho de captura roda com `nice(5)` para o pump USB não perder ticks:
+  com o grab de ~45 ms o USB voltou a 57–60 fps (antes oscilava 51–58).
 - O LaunchAgent sobe `MODE_1024x768` (65 MHz, o mais alto estável) com desktop virtual 1280x960;
   1440x900/1080p via `--mode`.
 

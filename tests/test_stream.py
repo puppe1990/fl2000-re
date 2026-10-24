@@ -1038,3 +1038,23 @@ def test_cmd_bars_streams_the_requested_mode(monkeypatch):
     assert stream.cmd_bars(FL2000(dev=FakeBulkDevice()), 0.01, MODE_1920x1080) == 0
     assert seen["mode"] is MODE_1920x1080
     assert seen["frame_len"] == 4_147_200
+
+
+def test_lower_capture_priority_calls_nice(monkeypatch):
+    seen = []
+    monkeypatch.setattr(stream.os, "nice", lambda n: seen.append(n))
+    stream.lower_capture_priority()
+    assert seen == [5]
+
+
+def test_lower_capture_priority_tolerates_oserror(monkeypatch):
+    monkeypatch.setattr(stream.os, "nice", lambda _n: (_ for _ in ()).throw(OSError()))
+    stream.lower_capture_priority()
+
+
+def test_capture_child_lowers_priority_before_grabbing(monkeypatch):
+    calls = []
+    monkeypatch.setattr(stream, "lower_capture_priority", lambda: calls.append("nice"))
+    monkeypatch.setattr(stream, "hdmi_capture_worker", lambda *a: calls.append("worker"))
+    stream._capture_child(1, 2, 3)
+    assert calls == ["nice", "worker"]
