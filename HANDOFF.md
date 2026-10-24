@@ -56,6 +56,11 @@ Outros achados:
 - `1920x1080@60` pede 249 MB/s; o P2016 não aceita o timing, então não foi validado num sink real.
 - **Teto do link**: 1024x768@60 (65 MHz) fica estável; 1280x720 (74 MHz) pisca pouco; 1280x800 (84
   MHz) e 1440x900 (107 MHz) piscam muito. O corte está entre 65 e 74 MHz.
+- **OSD do P2016 guarda posição/escala por modo**: depois de trocar o timing a imagem pode ficar
+  alguns pixels alta com faixa preta embaixo. O quadro enviado está completo (conferido no
+  `preview.png` e no grab do filho), então é o monitor: Display → **Reset Display** devolve o padrão
+  daquele modo; `Vertical Position` (50) ajusta fino. `--v-shift` não resolve: o vstart só tem ~2
+  linhas de folga no 1024x768 e aumentar o blanking derruba o USB para ~46 fps.
 - O LaunchAgent sobe `MODE_1024x768` (65 MHz, o mais alto estável); 1440x900/1080p via `--mode`.
 
 ## Resultado medido (o essencial)
