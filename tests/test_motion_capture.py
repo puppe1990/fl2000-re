@@ -55,6 +55,7 @@ def test_call_uses_fast_filter_only_while_content_moves(monkeypatch):
     capture = MotionCapture(
         lambda: (bytes([next(values)]) * (48 * 48 * 3), 48, 48), 24, 24, 1.0, 1.0
     )
+    monkeypatch.setattr(capture.scaler, "resize", lambda *args: None)
     times = iter([1.0, 2.0, 3.0])
     monkeypatch.setattr("fl2000_re.motion_capture.time.monotonic", lambda: next(times))
     seen = []
@@ -68,3 +69,49 @@ def test_call_uses_fast_filter_only_while_content_moves(monkeypatch):
     capture()
     capture()
     assert seen == [False, True, False]
+
+
+def test_unchanged_image_reuses_fitted_bytes_without_scaling(monkeypatch):
+    capture = make_capture()
+    calls = []
+    monkeypatch.setattr(capture, "_fit", lambda *args: calls.append(args) or bytes(24 * 24 * 3))
+    first = capture()
+    assert not capture.cached
+    assert capture() is first
+    assert capture.cached
+    assert len(calls) == 1
+
+
+def test_motion_settling_rebuilds_cached_frame_with_text_filter(monkeypatch):
+    capture = make_capture()
+    times = iter([1.0, 2.0])
+    monkeypatch.setattr("fl2000_re.motion_capture.time.monotonic", lambda: next(times))
+    capture.motion_until = 1.5
+    calls = []
+    monkeypatch.setattr(capture, "_fit", lambda *args: calls.append(capture.moving) or bytes(3))
+    capture()
+    capture()
+    assert calls == [True, False]
+    assert not capture.cached
+
+
+def test_accelerated_filter_only_runs_for_matching_full_raster(monkeypatch):
+    capture = make_capture()
+    capture.moving = True
+    monkeypatch.setattr(capture.scaler, "resize", lambda *args: b"accelerated")
+    assert capture._fit(bytes(48 * 48 * 3), 48, 48) == b"accelerated"
+    capture.underscan = 0.9
+    assert len(capture._fit(bytes(48 * 48 * 3), 48, 48)) == 24 * 24 * 3
+    capture.underscan = 1.0
+    assert len(capture._fit(bytes(48 * 24 * 3), 48, 24)) == 24 * 24 * 3
+
+
+def test_cached_image_rebuilds_after_equal_byte_length_geometry_change(monkeypatch):
+    frames = iter([(bytes(48 * 24 * 3), 48, 24), (bytes(48 * 24 * 3), 24, 48)])
+    capture = MotionCapture(lambda: next(frames), 24, 24, 1.0, 1.0)
+    calls = []
+    monkeypatch.setattr(capture, "_fit", lambda *args: calls.append(args[1:]) or b"rgb")
+    capture()
+    capture()
+    assert calls == [(48, 24), (24, 48)]
+    assert not capture.cached

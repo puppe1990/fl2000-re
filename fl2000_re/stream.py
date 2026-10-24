@@ -3,8 +3,6 @@
 from __future__ import annotations
 
 import contextlib
-import multiprocessing as mp
-import os
 import time
 
 import usb.core
@@ -13,37 +11,75 @@ import usb.util
 from fl2000_re.capture import (
     Grabber,
     ScreencaptureError,
-    grab_cg_display_rgb,
     grab_letterboxed_rgb,
-    grab_main_display_rgb,
     grab_via_screencapture,
 )
+from fl2000_re.capture_pacing import (
+    CAPTURE_LEAD as CAPTURE_LEAD,
+)
+from fl2000_re.capture_pacing import (
+    EXTEND_CAPTURE_FPS as EXTEND_CAPTURE_FPS,
+)
+from fl2000_re.capture_pacing import (
+    FLUID_CAPTURE_FPS as FLUID_CAPTURE_FPS,
+)
+from fl2000_re.capture_pacing import IDLE_CAPTURE_FPS as IDLE_CAPTURE_FPS
+from fl2000_re.capture_pacing import (
+    _sleep_until_tick as _sleep_until_tick,
+)
+from fl2000_re.capture_pacing import (
+    capture_backoff_s as capture_backoff_s,
+)
+from fl2000_re.capture_pacing import (
+    capture_fps_for_idle as capture_fps_for_idle,
+)
+from fl2000_re.capture_pacing import (
+    capture_period_s as capture_period_s,
+)
+from fl2000_re.capture_pacing import (
+    frame_period_s as frame_period_s,
+)
+from fl2000_re.capture_pacing import (
+    pointer_capture_period as pointer_capture_period,
+)
+from fl2000_re.capture_pacing import (
+    pointer_on_display as pointer_on_display,
+)
+from fl2000_re.capture_pacing import (
+    retune_pointer_period as retune_pointer_period,
+)
+from fl2000_re.capture_pacing import (
+    snapped_pointer as snapped_pointer,
+)
+from fl2000_re.capture_process import MAX_CAPTURE_RESTARTS, CaptureProcess
+from fl2000_re.capture_worker import (
+    _capture_child as _capture_child,
+)
+from fl2000_re.capture_worker import (
+    _retune_from_live_pointer as _retune_from_live_pointer,
+)
+from fl2000_re.capture_worker import (
+    hdmi_capture_worker as hdmi_capture_worker,
+)
+from fl2000_re.capture_worker import (
+    lower_capture_priority as lower_capture_priority,
+)
 from fl2000_re.fl2000_usb import FL2000
-from fl2000_re.frame_buffer import new_shared_frame, write_shared_frame
 from fl2000_re.hdmi import bring_up_hdmi
 from fl2000_re.letterbox import UNDERSCAN
-from fl2000_re.motion_capture import MotionCapture
 from fl2000_re.pixels import dword_swap_frame, make_bars_rgb565, pack_frame
 from fl2000_re.registers import BULK_EP
+from fl2000_re.stream_metrics import PumpMetrics
+from fl2000_re.stream_metrics import _maybe_print_stats as _maybe_print_stats
+from fl2000_re.stream_metrics import format_stream_stats as format_stream_stats
 from fl2000_re.video_modes import MODE_640x480, VideoMode, default_mirror_mode, needs_usb3
 
-STATS_INTERVAL_S = 1.0
 TARGET_FPS = 60
 USB3_LINK_SPEED = 4
 # USB still pumps 60 Hz by resending the last frame. Grabbing ~69 fps via
 # CGWindowListCreateImage is what pinned WindowServer on the 8 GB Air
 # (2026-10-20: grab 636-2735 ms, then four btn_rst freezes).
-EXTEND_CAPTURE_FPS = 20
-FLUID_CAPTURE_FPS = 60
-IDLE_CAPTURE_FPS = 5
-MOUSE_IDLE_S = 10.0
-HEAVY_GRAB_S = 0.080
-MAX_BACKOFF_S = 2.0
-# The capture child leads the pump: a tick that lands on a frame the pump already
-# sent is a stutter, and a child paced exactly at the tick period aliases into it.
-CAPTURE_LEAD = 1.15
 WAKE_GAP_S = 3.0
-MAX_CAPTURE_RESTARTS = 5
 CAPTURE_STALL_S = 5.0
 CAPTURE_START_S = 20.0
 PREVIEW_ATTEMPTS = 2
@@ -95,120 +131,6 @@ def send_frame(fl: FL2000, frame: bytes) -> None:
         fl.dev.write(BULK_EP, b"", timeout=50)
 
 
-def frame_period_s(freq: int) -> float:
-    """Bulk cadence for one FL2000 scanout (unpaced rewrites tear mid-scanout).
-
-    Example: frame_period_s(60) == pytest.approx(1 / 60)
-    """
-    if freq <= 0:
-        raise ValueError(f"frame rate must be positive, got freq={freq!r}")
-    return 1.0 / freq
-
-
-def capture_fps_for_idle(
-    idle_s: float,
-    active_fps: int = EXTEND_CAPTURE_FPS,
-    idle_fps: int = IDLE_CAPTURE_FPS,
-    idle_after_s: float = MOUSE_IDLE_S,
-    on_display: bool = False,
-    fluid_fps: int = FLUID_CAPTURE_FPS,
-) -> int:
-    """Fluid while the pointer is on the Hagibis; 5 fps after 10s still.
-
-    USB still resends the last frame at 60 Hz. Moving on that display snaps
-    to 60 fps with lead=1 so we do not grab 69/s.
-
-    Example: capture_fps_for_idle(0.0, on_display=True) == 60
-    """
-    if idle_s >= idle_after_s:
-        return min(active_fps, idle_fps)
-    if on_display:
-        return fluid_fps
-    return active_fps
-
-
-def pointer_on_display(xy: tuple[float, float], bounds: tuple[int, int, int, int] | None) -> bool:
-    """True when the pointer is on the virtual Hagibis desktop.
-
-    bounds=None means unknown or mirror: stay at rest fps so a 60 Hz grab of
-    the Air does not freeze WindowServer.
-
-    Example: pointer_on_display((-320.0, 240.0), (-640, 0, 640, 480)) is True
-    """
-    if bounds is None:
-        return False
-    from fl2000_re.cursor_overlay import cursor_local_xy
-
-    return cursor_local_xy(xy[0], xy[1], bounds[0], bounds[1], bounds[2], bounds[3]) is not None
-
-
-def pointer_capture_period(fps: int) -> float:
-    """60 fps fluid uses lead=1; rest/idle keep the 1.15 lead."""
-    if fps >= FLUID_CAPTURE_FPS:
-        return capture_period_s(fps, lead=1.0)
-    return capture_period_s(fps)
-
-
-def snapped_pointer(xy: tuple[float, float]) -> tuple[int, int]:
-    """Integer pointer cell; sub-pixel CG jitter must not reset the idle timer."""
-    return (int(round(xy[0])), int(round(xy[1])))
-
-
-def retune_pointer_period(
-    active_fps: int,
-    mouse_at: tuple[int, int] | None,
-    moved_at: float,
-    period: float,
-    next_tick: float,
-    now: float,
-    mouse_xy: tuple[float, float] | None,
-    display_bounds: tuple[int, int, int, int] | None = None,
-) -> tuple[tuple[int, int] | None, float, float, float]:
-    """60 fps while the pointer moves on the Hagibis; 5 fps after 10s still.
-
-    Example: retune_pointer_period(20, (10, 20), 0.0, 0.2, 100.0, 12.0, (40.0, 20.0), (0, 0, 640, 480))
-    """
-    if mouse_xy is None:
-        return mouse_at, moved_at, period, next_tick
-    snapped = snapped_pointer(mouse_xy)
-    on_display = pointer_on_display(mouse_xy, display_bounds)
-    if mouse_at is None or snapped != mouse_at:
-        fps = capture_fps_for_idle(0.0, active_fps=active_fps, on_display=on_display)
-        return snapped, now, pointer_capture_period(fps), now
-    fps = capture_fps_for_idle(now - moved_at, active_fps=active_fps, on_display=on_display)
-    return mouse_at, moved_at, pointer_capture_period(fps), next_tick
-
-
-def capture_backoff_s(
-    grab_s: float, heavy_s: float = HEAVY_GRAB_S, max_s: float = MAX_BACKOFF_S
-) -> float:
-    """Extra sleep after a slow CG grab so a dying WindowServer is not polled at 60 Hz.
-
-    A healthy 640x480 mss grab is ~8-15 ms. At 636-2735 ms the compositor is
-    already wedged; grabbing again immediately preceded the 2026-10-20 freezes.
-
-    Example: capture_backoff_s(2.735) == 2.0
-    """
-    if grab_s < heavy_s:
-        return 0.0
-    return min(max_s, grab_s)
-
-
-def capture_period_s(freq: int, lead: float = CAPTURE_LEAD) -> float:
-    """Capture cadence: the pump's period divided by lead, so no tick repeats a frame.
-
-    Free-running the child at ~125 fps cost 44% of a core grabbing frames the 60 Hz
-    pump discards; paced at 60x1.15 it costs 24% and still feeds every tick
-    (measured 2026-10-11). A slow grab is never delayed further: the worker skips
-    the sleep when it is already past the slot.
-
-    Example: capture_period_s(60) == pytest.approx(1 / 69)
-    """
-    if lead < 1:
-        raise ValueError(f"lead must be at least 1 (the pump's cadence), got lead={lead!r}")
-    return frame_period_s(freq) / lead
-
-
 def release_bulk(fl: FL2000) -> None:
     with contextlib.suppress(usb.core.USBError):
         usb.util.release_interface(fl.dev, 0)
@@ -245,244 +167,6 @@ def cmd_bars(fl: FL2000, seconds: float, mode: VideoMode | None = None) -> int:
     return _pump_until(fl, frame, seconds)
 
 
-def hdmi_capture_worker(
-    width: int,
-    height: int,
-    bpp: int,
-    display_id: int | None,
-    shm,
-    n: int,
-    counter,
-    stop,
-    underscan: float,
-    stretch_x: float,
-    include_cursor: bool = True,
-    grab_ms=None,
-    target_fps: int | None = None,
-    idle_flag=None,
-    frame_lock=None,
-) -> None:
-    """Fill shm with a packed HDMI frame; never touches USB.
-
-    display_id is a CGDirectDisplayID for extend, or None to clone the Air.
-    target_fps paces the loop to the sink's refresh; None runs flat out, which
-    only makes sense when nobody is waiting on a fixed cadence.
-    """
-    # Array(..., lock=False) has no get_obj() on some Python builds.
-    buf = shm.get_obj() if hasattr(shm, "get_obj") else shm
-    grab = (
-        grab_main_display_rgb if display_id is None else _grab_display(display_id, include_cursor)
-    )
-    motion_capture = MotionCapture(grab, width, height, underscan, stretch_x)
-    period = capture_period_s(target_fps) if target_fps else 0.0
-    next_tick = time.monotonic()
-    mouse_at: tuple[int, int] | None = None
-    moved_at = next_tick
-    bounds = _virtual_display_bounds(display_id)
-    while not stop.is_set():
-        if target_fps:
-            if display_id is not None and bounds is None:
-                bounds = _virtual_display_bounds(display_id)
-            mouse_at, moved_at, period, next_tick = _retune_from_live_pointer(
-                target_fps, mouse_at, moved_at, period, next_tick, display_bounds=bounds
-            )
-            if idle_flag is not None:
-                idle_flag.value = int(period >= pointer_capture_period(IDLE_CAPTURE_FPS) - 1e-9)
-        t0 = time.perf_counter()
-        rgb = motion_capture()
-        if target_fps and motion_capture.moving:
-            # Video can move while the pointer is parked on another monitor.
-            period = min(period, pointer_capture_period(FLUID_CAPTURE_FPS))
-            if idle_flag is not None:
-                idle_flag.value = 0
-        packed = pack_frame(rgb, bpp)
-        grab_s = time.perf_counter() - t0
-        if grab_ms is not None:
-            grab_ms.value = grab_s * 1000
-        if len(packed) != n:
-            continue
-        with frame_lock if frame_lock is not None else contextlib.nullcontext():
-            write_shared_frame(buf, packed)
-            counter.value += 1
-        extra = capture_backoff_s(grab_s)
-        if extra:
-            time.sleep(extra)
-            next_tick = time.monotonic()
-        elif period:
-            next_tick = _sleep_until_tick(next_tick, max(period, grab_s * 1.25), time.monotonic())
-
-
-def _retune_from_live_pointer(
-    active_fps: int,
-    mouse_at: tuple[int, int] | None,
-    moved_at: float,
-    period: float,
-    next_tick: float,
-    display_bounds: tuple[int, int, int, int] | None = None,
-) -> tuple[tuple[int, int] | None, float, float, float]:
-    from fl2000_re import cursor_overlay
-
-    try:
-        xy = cursor_overlay.mouse_global_xy()
-    except Exception:
-        xy = None
-    return retune_pointer_period(
-        active_fps,
-        mouse_at,
-        moved_at,
-        period,
-        next_tick,
-        time.monotonic(),
-        xy,
-        display_bounds,
-    )
-
-
-def _virtual_display_bounds(display_id: int | None) -> tuple[int, int, int, int] | None:
-    if display_id is None:
-        return None
-    from fl2000_re.capture import cg_display_bounds
-
-    try:
-        return cg_display_bounds(display_id)
-    except Exception:
-        return None
-
-
-def _grab_display(display_id: int, include_cursor: bool = True) -> Grabber:
-    return lambda: grab_cg_display_rgb(display_id, include_cursor=include_cursor)
-
-
-def lower_capture_priority(nice: int = 5) -> None:
-    """Give the 60 Hz USB pump priority over the capture child.
-
-    The child spends ~50 ms per frame at 1280x960; nice(5) keeps the pump from
-    missing ticks when a grab spikes. Example: lower_capture_priority()
-    """
-    with contextlib.suppress(OSError):
-        os.nice(nice)
-
-
-def _capture_child(*args) -> None:
-    lower_capture_priority()
-    hdmi_capture_worker(*args)
-
-
-class CaptureProcess:
-    """Owns the capture child and its shared frame so a dead child can be respawned.
-
-    Pumping the last frame during a restart keeps the HDMI lit; a child killed by
-    the OS (SIGKILL) or wedged mid-grab must never freeze the desktop forever
-    (2026-09-20: signal 9 left a frozen frame and 15k "0.0 fps" log lines).
-    """
-
-    def __init__(
-        self,
-        frame: bytes,
-        mode: VideoMode,
-        display_id: int | None,
-        underscan: float,
-        stretch_x: float,
-        cursor: bool,
-        restarts_left: int = MAX_CAPTURE_RESTARTS,
-        capture_fps: int | None = None,
-    ) -> None:
-        self._mode = mode
-        self._display_id = display_id
-        self._underscan = underscan
-        self._stretch_x = stretch_x
-        self._cursor = cursor
-        self._restarts_left = restarts_left
-        self._capture_fps = mode.freq if capture_fps is None else capture_fps
-        self.n = len(frame)
-        self.shm = new_shared_frame(frame)
-        self.frame_lock = mp.Lock()
-        self._last_complete_frame = frame
-        self.counter = mp.Value("i", 1)
-        self.grab_ms = mp.Value("d", 0.0)
-        self.idle = mp.Value("i", 0)
-        self.stop = mp.Event()
-        self.proc = None
-        self._baseline = self.counter.value
-
-    def start(self) -> None:
-        self._baseline = self.counter.value
-        self.proc = mp.Process(target=_capture_child, args=self._worker_args(), daemon=True)
-        self.proc.start()
-
-    def _worker_args(self) -> tuple:
-        return (
-            self._mode.width,
-            self._mode.height,
-            self._mode.bpp,
-            self._display_id,
-            self.shm,
-            self.n,
-            self.counter,
-            self.stop,
-            self._underscan,
-            self._stretch_x,
-            self._cursor,
-            self.grab_ms,
-            self._capture_fps,
-            self.idle,
-            self.frame_lock,
-        )
-
-    def alive(self) -> bool:
-        return self.proc is not None and self.proc.is_alive()
-
-    def has_frame(self) -> bool:
-        """True once the current child has produced a frame (import+first grab done)."""
-        return self.counter.value != self._baseline
-
-    def exitcode(self) -> int | None:
-        return None if self.proc is None else self.proc.exitcode
-
-    def buffer(self):
-        return self.shm.get_obj() if hasattr(self.shm, "get_obj") else self.shm
-
-    def snapshot(self) -> bytes:
-        """Copy a complete frame without delaying USB if the writer is busy.
-
-        Example: send_frame(fl, capture.snapshot())
-        """
-        if not self.frame_lock.acquire(block=False):
-            return self._last_complete_frame
-        try:
-            self._last_complete_frame = bytes(self.buffer())
-        finally:
-            self.frame_lock.release()
-        return self._last_complete_frame
-
-    def restart(self) -> bool:
-        if self._restarts_left <= 0:
-            return False
-        self._restarts_left -= 1
-        self._kill_current()
-        self.start()
-        print(f"  reiniciando a captura ({self._restarts_left} tentativas restantes).", flush=True)
-        return True
-
-    def _kill_current(self) -> None:
-        if self.proc is None:
-            return
-        with contextlib.suppress(Exception):
-            self.proc.terminate()
-        with contextlib.suppress(Exception):
-            self.proc.join(timeout=1)
-        self.proc = None
-        # A terminated writer may have owned the old lock; never reuse it.
-        self.frame_lock = mp.Lock()
-
-    def stop_and_join(self, timeout: float = 1.0) -> None:
-        self.stop.set()
-        if self.proc is None:
-            return
-        with contextlib.suppress(Exception):
-            self.proc.join(timeout=timeout)
-
-
 def capture_worker_exit_message(exitcode: int | None) -> str:
     """Portuguese diagnostic when the capture child dies (SIGSEGV cannot be excepted).
 
@@ -503,49 +187,6 @@ def capture_worker_exit_message(exitcode: int | None) -> str:
             " HDMI ficou no último frame para o monitor não apagar. Religue o extend."
         )
     return f"  captura saiu com código {exitcode}. HDMI ficou no último frame. Religue o extend."
-
-
-def format_stream_stats(
-    label: str,
-    capture_fps: float,
-    usb_fps: float,
-    grab_ms: float,
-    cursor: bool,
-    target_fps: int = TARGET_FPS,
-    capture_target_fps: int | None = None,
-    parked: bool = False,
-) -> str:
-    """One Portuguese status line for the live extend/mirror log.
-
-    Example: format_stream_stats("estendendo", 7.4, 60.0, 134.0, True)
-    """
-    method = "mss+cursor" if cursor else "mss"
-    cap_target = target_fps if capture_target_fps is None else capture_target_fps
-    bottleneck = _stream_bottleneck(
-        capture_fps, usb_fps, target_fps, cursor, cap_target, parked=parked
-    )
-    return (
-        f"  {label}  captura {capture_fps:.1f} fps ({method} {grab_ms:.0f}ms)  "
-        f"USB {usb_fps:.1f} fps  {bottleneck}"
-    )
-
-
-def _stream_bottleneck(
-    capture_fps: float,
-    usb_fps: float,
-    target_fps: int,
-    cursor: bool,
-    capture_target_fps: int,
-    parked: bool = False,
-) -> str:
-    if parked:
-        return "ponteiro parado"
-    if capture_fps < capture_target_fps * 0.85:
-        hint = " — tente --no-cursor" if cursor else ""
-        return f"gargalo: captura{hint}"
-    if usb_fps < target_fps * 0.85:
-        return "gargalo: USB"
-    return "gargalo: nenhum"
 
 
 def _grab_preview_rgb(
@@ -706,7 +347,7 @@ def _pace_clone(
         sent = _pump_paced_frames(fl, capture, mode, seconds, t0, label, cursor)
         rc = 0 if sent else 1
     except KeyboardInterrupt:
-        rc = 0 if sent else 1
+        rc = 0 if capture.sent_frames else 1
     except usb.core.USBError as exc:
         print(f"  bulk erro: {exc}")
         rc = 1
@@ -717,6 +358,7 @@ def _pace_clone(
         print(f"  {exc}", flush=True)
         rc = 1
     finally:
+        sent = capture.sent_frames
         capture.stop_and_join()
         dt = max(0.001, time.monotonic() - t0)
         print(
@@ -747,6 +389,7 @@ def _pump_paced_frames(
     progress_cap = stat_cap
     last_progress = t0
     wall0, up0 = _read_clocks()
+    pump_metrics = PumpMetrics(mode.freq)
     while end_at is None or time.monotonic() < end_at:
         wall0, up0 = _raise_if_woke(wall0, up0)
         now = time.monotonic()
@@ -761,9 +404,18 @@ def _pump_paced_frames(
             raise CaptureDeadError(
                 "captura nao se recuperou; saindo para o LaunchAgent religar o extend."
             )
-        send_frame(fl, capture.snapshot())
+        frame = capture.snapshot()
+        usb_start = time.monotonic()
+        send_frame(fl, frame)
         sent += 1
+        capture.sent_frames = sent
         now = time.monotonic()
+        pump_metrics.record(
+            usb_start,
+            now,
+            getattr(capture, "snapshot_fresh", True),
+            getattr(capture, "frame_at", 0.0),
+        )
         last_log, last_sent, stat_cap = _maybe_print_stats(
             now,
             last_log,
@@ -777,6 +429,8 @@ def _pump_paced_frames(
             mode.freq,
             getattr(capture, "_capture_fps", mode.freq),
             parked=_capture_parked(capture),
+            pump_metrics=pump_metrics,
+            capture_metrics=getattr(capture, "metrics", None),
         )
         next_tick = _sleep_until_tick(next_tick, period, now)
     return sent
@@ -814,53 +468,9 @@ def _raise_if_woke(wall_prev: float, up_prev: float) -> tuple[float, float]:
     return wall, up
 
 
-def _maybe_print_stats(
-    now: float,
-    last_log: float,
-    last_sent: int,
-    last_cap: int,
-    sent: int,
-    counter,
-    grab_ms,
-    label: str,
-    cursor: bool,
-    target_fps: int,
-    capture_target_fps: int | None = None,
-    parked: bool = False,
-) -> tuple[float, int, int]:
-    if now - last_log < STATS_INTERVAL_S:
-        return last_log, last_sent, last_cap
-    dt = now - last_log
-    print(
-        format_stream_stats(
-            label,
-            (counter.value - last_cap) / dt,
-            (sent - last_sent) / dt,
-            grab_ms.value,
-            cursor,
-            target_fps,
-            capture_target_fps,
-            parked,
-        ),
-        flush=True,
-    )
-    return now, sent, counter.value
-
-
 def _capture_parked(capture) -> bool:
     idle = getattr(capture, "idle", None)
     return idle is not None and bool(idle.value)
-
-
-def _sleep_until_tick(next_tick: float, period: float, now: float) -> float:
-    next_tick += period
-    delay = next_tick - now
-    if delay > 0:
-        time.sleep(delay)
-        return next_tick
-    if delay < -period:
-        return now
-    return next_tick
 
 
 def _pump_until(fl: FL2000, frame: bytes, seconds: float) -> int:
