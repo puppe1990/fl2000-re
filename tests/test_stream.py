@@ -436,7 +436,7 @@ def test_capture_process_starts_the_child_paced_to_the_mode_refresh(monkeypatch)
     monkeypatch.setattr(stream.mp, "Process", RecordingProcess)
     capture = stream.CaptureProcess(bytes(512), MODE_640x480, None, 1.0, 1.0, False)
     capture.start()
-    assert seen["args"][-2] == MODE_640x480.freq
+    assert seen["args"][-3] == MODE_640x480.freq
     capture.stop_and_join()
 
 
@@ -454,7 +454,7 @@ def test_capture_process_can_pace_below_the_usb_refresh(monkeypatch):
         bytes(512), MODE_640x480, None, 1.0, 1.0, False, capture_fps=stream.EXTEND_CAPTURE_FPS
     )
     capture.start()
-    assert seen["args"][-2] == stream.EXTEND_CAPTURE_FPS
+    assert seen["args"][-3] == stream.EXTEND_CAPTURE_FPS
     assert stream.EXTEND_CAPTURE_FPS == 20
     capture.stop_and_join()
 
@@ -609,6 +609,9 @@ class TickingCapture:
 
     def buffer(self) -> bytes:
         return bytes(512)
+
+    def snapshot(self) -> bytes:
+        return self.buffer()
 
 
 def test_pump_reports_capture_fps_when_counter_advances(monkeypatch, capsys):
@@ -1058,3 +1061,43 @@ def test_capture_child_lowers_priority_before_grabbing(monkeypatch):
     monkeypatch.setattr(stream, "hdmi_capture_worker", lambda *a: calls.append("worker"))
     stream._capture_child(1, 2, 3)
     assert calls == ["nice", "worker"]
+
+
+def test_snapshot_reuses_complete_frame_while_writer_is_busy():
+    capture = stream.CaptureProcess(bytes(512), MODE_640x480, None, 1.0, 1.0, False)
+    capture.frame_lock.acquire()
+    try:
+        capture.buffer()[0] = 99
+        assert capture.snapshot() == bytes(512)
+    finally:
+        capture.frame_lock.release()
+    assert capture.snapshot()[0] == 99
+
+
+def test_restart_replaces_lock_left_owned_by_dead_writer():
+    capture = stream.CaptureProcess(bytes(512), MODE_640x480, None, 1.0, 1.0, False)
+    previous = capture.frame_lock
+    previous.acquire()
+    capture.proc = types.SimpleNamespace(terminate=lambda: None, join=lambda **kw: None)
+    try:
+        capture._kill_current()
+        assert capture.frame_lock is not previous
+        assert capture.snapshot() == bytes(512)
+    finally:
+        previous.release()
+
+
+def test_slow_capture_leaves_compositor_headroom(monkeypatch):
+    periods = []
+    clock = iter(i * 0.05 for i in range(10000))
+    monkeypatch.setattr(stream.time, "perf_counter", lambda: next(clock))
+    original = stream._sleep_until_tick
+
+    def record_period(tick, period, now):
+        periods.append(period)
+        return original(tick, period, now)
+
+    monkeypatch.setattr(stream, "_sleep_until_tick", record_period)
+    _run_worker_once(monkeypatch, target_fps=60)
+    assert periods
+    assert min(periods) >= 0.0625 - 1e-9
