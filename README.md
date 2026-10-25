@@ -15,8 +15,9 @@ transmitter — not DisplayLink, and not a native extra macOS display.
   image.
 - **1440×900 @ 60 Hz** (Dell P2016 native) and **1920×1080** / **1920×1080@30** timings from
   Fresco's official `big_table_16bit_r0`. All need a SuperSpeed link. Through the HDMI→VGA adapter
-  they lock but flicker at high pixel clocks, so the LaunchAgent runs **1024×768** (65 MHz, the last
-  stable mode); the P2016 OSD rejects 1080p outright.
+  they lock but flicker at high pixel clocks. The LaunchAgent currently tests **1024×768 at about 50
+  Hz** (54 MHz) after the original 65 MHz profile showed partial USB timeouts; the P2016 OSD rejects
+  1080p outright.
 - **mirror** the Mac screen onto HDMI at **720×480 @ 60 Hz** RGB565 (CEA 480p 16:9). 640×480 4:3
   stretched on the Dell; 800×600 RGB332 never locked.
 

@@ -69,9 +69,11 @@ tests/test_<module>.py    mirrors the package
 - Default clone/extend HDMI is 720x480 RGB565 @ 60 Hz (CEA 480p 16:9). 640x480 4:3 is stretched on
   the Dell 16:9. 720p RGB565 overruns USB 2.0. 800x600 RGB332 never locked.
 - USB 3 changes the ceiling: 1440x900/1080p timings from Fresco's `big_table_16bit_r0` lock and
-  stream, but flicker through the HDMI→VGA adapter above ~80 MHz. 1024x768@60 (65 MHz) is the
-  highest stable mode and what the LaunchAgent runs; 720p (74 MHz) already flickers. Native modes
-  need `--underscan 1.0`; the 0.92 default rescales and costs ~150 ms/frame.
+  stream, but flicker through the HDMI→VGA adapter above ~80 MHz. The original 1024x768@60 (65 MHz)
+  later showed confirmed USB partial timeouts (2026-10-25). The LaunchAgent is testing 1024x768@50
+  (54 MHz; custom 49.849 Hz raster), preserving virtual 1280x960. It is not yet proof of long-term
+  stability; named `1024x768` remains 60 Hz. Native modes need `--underscan 1.0`; the 0.92 default
+  rescales and costs ~150 ms/frame.
 - Every bulk frame MUST end with a zero-length packet. The chip's EOF is the ZLP (REG_ACLK bit 28),
   not the transfer's short packet; the reference driver submits one per frame unconditionally.
   Gating it on 512-byte alignment broke 1440x900 (2026-10-23).
@@ -87,6 +89,8 @@ tests/test_<module>.py    mirrors the package
 - Both Hagibis HDMIs always show the same FL2000 stream. Native USB-C HDMI is a separate GPU pipe
   and is unrelated.
 - REG_ACLK bit 28 must stay set (EOF = ZLP) or bulk NAKs forever.
+- REG_STATUS bits 8/9 are underflow/overflow respectively (Fresco `struct vga_status`). Earlier
+  labels were reversed. Normal overflow latching must not be misdiagnosed as underflow.
 - Kill the mirror by exact PID. Never `pkill -f hagibis_re.py`.
 - After Access denied / claim fail: unplug the Hagibis USB-A, then `diskutil unmountDisk` the
   FL2000DX fake CD if it remounts.

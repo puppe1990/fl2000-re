@@ -3,6 +3,25 @@
 Resumo do estado do projeto, do que foi medido no hardware e do que falta. Leia junto com
 `AGENTS.md` (regras) e `README.md` (uso).
 
+## 2026-10-25 — apagões confirmados no USB, perfil de menor clock em teste
+
+- Log do kernel confirma timeout do endpoint OUT 0x01 com os mesmos bytes parciais do app. Exemplos:
+  18:37:35 (917504/1572864), 18:41:17 (833536/1572864), 18:50:15 e 18:50:35.
+- PyUSB/libusb1 retorna uma contagem parcial após timeout sem necessariamente lançar exceção. O
+  transporte agora verifica o tamanho, não envia EOF de quadro parcial e não esconde erro de ZLP.
+- Experimentos com par pixels/EOF em fila e com blocos de 256 KiB também falharam; foram retirados.
+  O último bloco do teste falhou às 18:57:01 (1529856/1572864). Não tratá-los como correção.
+- As configurações USB U1/U2 já correspondiam ao driver Fresco: REG 0x70 bits 19/20 em 1 e REG 0x78
+  bit 17 em 0. O problema não foi atribuído à economia de energia.
+- Correção do diagnóstico: REG_STATUS bit 8 = underflow, bit 9 = overflow, conforme
+  `src/fl2000_interrupt.h` da Fresco. As etiquetas anteriores estavam invertidas.
+- Perfil atual em validação: mesmo raster 1024x768 e desktop 1280x960, PLL 54 MHz (0x001B2105),
+  frequência real 49.849 Hz. Reduz ~94 para ~79 MB/s. Não é modo VESA DMT.
+- Cada sessão agora registra run ID, commit, hash dos fontes/helper, timing e link USB. Isso permite
+  diferenciar uma edição de código de um reinício simples sem depender da memória do usuário.
+- Ainda é necessário validar estabilidade por tempo maior e compatibilidade na tela física. Não
+  afirmar que a redução de clock eliminou os apagões apenas por uma amostra curta sem falhas.
+
 ## Objetivo da missão
 
 Deixar a imagem no monitor ligado ao **Hagibis FL2000DX** (`1d5c:2000`) **nítida/legível**. O
