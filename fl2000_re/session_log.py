@@ -9,7 +9,6 @@ import uuid
 from pathlib import Path
 
 from fl2000_re.fl2000_usb import FL2000
-from fl2000_re.registers import BULK_BLOCK_BYTES
 from fl2000_re.video_modes import VideoMode
 
 
@@ -73,7 +72,7 @@ def start_stream_session(
                 "hdmi": [mode.width, mode.height, mode.freq],
                 "pixel_clock_hz": mode.pixclk,
                 "frame_bytes": mode.width * mode.height * mode.bpp,
-                "bulk_block_bytes": BULK_BLOCK_BYTES,
+                "bulk_block_bytes": mode.width * mode.height * mode.bpp,
                 "capture_fps": capture_fps,
                 "display_id": display_id,
                 "usb_speed": getattr(fl.dev, "speed", None),

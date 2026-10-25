@@ -55,10 +55,11 @@ guarantee of 60 distinct video frames per second.
 clones **that** display to HDMI. `CGVirtualDisplay` is a private API and can break on a macOS
 update. Run `extend` from Terminal.app with Screen Recording permission.
 
-Frames are sent in 256 KiB blocks, aligned to both USB 2 and SuperSpeed packet sizes, with only one
-mandatory ZLP after the complete frame. A partial block stops the frame without retry or EOF; its
-diagnostic includes the block offset and cumulative frame byte count. Chunking bounds each host
-transfer; it is not a guarantee that device/controller stalls or physical signal loss are resolved.
+The LaunchAgent is currently testing `1024x768@50`: the same HDMI raster and 1280x960 virtual
+desktop at a 54 MHz pixel clock (49.849 Hz actual). This reduces raw traffic from about 94 MB/s to
+79 MB/s. It is a custom timing, not a standard VESA DMT mode; monitor compatibility and long-term
+stability remain under validation. The original `--mode 1024x768` remains 60 Hz/65 MHz. A 256 KiB
+chunking experiment still timed out and was removed from the active transport.
 
 Each session logs a run ID, commit, runtime source/helper hash, HDMI timing, frame/block sizes and
 USB speed/bus/address. Session-end records share the same ID. The source hash also changes for

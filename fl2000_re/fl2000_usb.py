@@ -113,8 +113,9 @@ STATUS_BITS = {
     2: "lbuf_halt",
     6: "pll",
     7: "dac",
-    8: "lbuf_ovf",
-    9: "lbuf_udf",
+    # Fresco src/fl2000_interrupt.h struct vga_status: underflow precedes overflow.
+    8: "lbuf_udf",
+    9: "lbuf_ovf",
     26: "hdmi_evt",
     27: "hdmi",
     28: "edid",

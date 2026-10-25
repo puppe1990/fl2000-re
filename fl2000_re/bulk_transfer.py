@@ -8,7 +8,7 @@ import time
 import usb.core
 
 from fl2000_re.fl2000_usb import FL2000
-from fl2000_re.registers import BULK_BLOCK_BYTES, BULK_EP
+from fl2000_re.registers import BULK_EP
 
 BULK_TIMEOUT_MS = 2000
 EOF_TIMEOUT_MS = 50
@@ -21,7 +21,13 @@ def send_frame(fl: FL2000, frame: bytes) -> None:
     PyUSB/libusb1 can return a short byte count after a timeout without raising.
     Example: send_frame(fl, packed_frame)
     """
-    bulk_ms = _write_pixels(fl, frame)
+    sent, bulk_ms = _write_phase(fl, frame, BULK_TIMEOUT_MS, "pixels")
+    if sent != len(frame):
+        _transfer_event("usb_frame_incomplete", "pixels", bulk_ms, sent, len(frame))
+        raise usb.core.USBError(
+            f"quadro USB incompleto: enviados {sent} bytes; esperados {len(frame)}. "
+            "Envio interrompido sem repetir o quadro. Reconecte o USB-A do Hagibis."
+        )
     # REG_ACLK bit 28 uses ZLP as EOF, including non-512-aligned modes.
     eof_count, eof_ms = _write_phase(fl, b"", EOF_TIMEOUT_MS, "eof")
     if eof_count != 0:
@@ -31,16 +37,14 @@ def send_frame(fl: FL2000, frame: bytes) -> None:
             "usb_frame_slow",
             "frame",
             bulk_ms + eof_ms,
-            len(frame),
+            sent,
             len(frame),
             bulk_ms=bulk_ms,
             eof_ms=eof_ms,
         )
 
 
-def _write_phase(
-    fl: FL2000, payload: bytes, timeout: int, phase: str, **context: object
-) -> tuple[int, float]:
+def _write_phase(fl: FL2000, payload: bytes, timeout: int, phase: str) -> tuple[int, float]:
     start = time.perf_counter()
     try:
         count = fl.dev.write(BULK_EP, payload, timeout=timeout)
@@ -55,7 +59,6 @@ def _write_phase(
             errno=exc.errno,
             backend_error_code=exc.backend_error_code,
             error=str(exc),
-            **context,
         )
         raise
     return count, (time.perf_counter() - start) * 1000
@@ -78,30 +81,3 @@ def _transfer_event(
         ),
         flush=True,
     )
-
-
-def _write_pixels(fl: FL2000, frame: bytes) -> float:
-    elapsed_ms = 0.0
-    for offset in range(0, len(frame), BULK_BLOCK_BYTES):
-        block = frame[offset : offset + BULK_BLOCK_BYTES]
-        count, duration = _write_phase(
-            fl, block, BULK_TIMEOUT_MS, "pixels", offset=offset, frame_bytes=len(frame)
-        )
-        elapsed_ms += duration
-        if count != len(block):
-            total = offset + count
-            _transfer_event(
-                "usb_frame_incomplete",
-                "pixels",
-                elapsed_ms,
-                total,
-                len(frame),
-                block_offset=offset,
-                block_sent=count,
-                block_expected=len(block),
-            )
-            raise usb.core.USBError(
-                f"quadro USB incompleto: enviados {total} bytes; esperados {len(frame)}. "
-                f"Bloco em {offset}: {count}/{len(block)} bytes. Sem retry; reconecte o USB-A."
-            )
-    return elapsed_ms

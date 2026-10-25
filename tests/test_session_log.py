@@ -45,7 +45,7 @@ def test_session_reports_effective_usb_profile_and_link(monkeypatch, capsys):
     start, end = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
     assert start["commit"] == "abc123"
     assert start["source_hash"] == "fingerprint"
-    assert start["bulk_block_bytes"] == 262144
+    assert start["bulk_block_bytes"] == 1572864
     assert start["frame_bytes"] == 1572864
     assert start["usb_speed"] == 4
     assert start["hdmi"] == [1024, 768, 60]
