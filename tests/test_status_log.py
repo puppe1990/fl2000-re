@@ -21,7 +21,7 @@ class FakeUSBDevice:
 
 
 def test_status_flags_names_monitor_and_underflow():
-    assert status_flags((1 << 9) | (1 << 29)) == ["lbuf_udf", "monitor"]
+    assert status_flags((1 << 8) | (1 << 29)) == ["lbuf_udf", "monitor"]
 
 
 def test_status_frame_count_reads_bits_10_to_25():

@@ -70,6 +70,7 @@ from fl2000_re.fl2000_usb import FL2000
 from fl2000_re.hdmi import bring_up_hdmi
 from fl2000_re.letterbox import UNDERSCAN
 from fl2000_re.pixels import dword_swap_frame, make_bars_rgb565, pack_frame
+from fl2000_re.session_log import end_stream_session, start_stream_session
 from fl2000_re.stream_metrics import PumpMetrics
 from fl2000_re.stream_metrics import _maybe_print_stats as _maybe_print_stats
 from fl2000_re.stream_metrics import format_stream_stats as format_stream_stats
@@ -327,6 +328,7 @@ def _pace_clone(
         restarts_left=restart_budget,
         capture_fps=capture_fps,
     )
+    run_id = start_stream_session(fl, mode, display_id, capture._capture_fps)
     capture.start()
     qos = "ativa" if prioritize_usb_thread() else "indisponivel"
     print(
@@ -359,6 +361,7 @@ def _pace_clone(
             f"  USB {sent / dt:.1f} fps, captura {capture.counter.value / dt:.1f} fps "
             f"({sent} frames / {dt:.1f}s)"
         )
+        end_stream_session(run_id, rc, sent, dt)
         release_bulk(fl)
     return rc
 

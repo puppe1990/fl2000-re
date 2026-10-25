@@ -15,8 +15,9 @@ transmitter — not DisplayLink, and not a native extra macOS display.
   image.
 - **1440×900 @ 60 Hz** (Dell P2016 native) and **1920×1080** / **1920×1080@30** timings from
   Fresco's official `big_table_16bit_r0`. All need a SuperSpeed link. Through the HDMI→VGA adapter
-  they lock but flicker at high pixel clocks, so the LaunchAgent runs **1024×768** (65 MHz, the last
-  stable mode); the P2016 OSD rejects 1080p outright.
+  they lock but flicker at high pixel clocks. The LaunchAgent currently tests **1024×768 at about 50
+  Hz** (54 MHz) after the original 65 MHz profile showed partial USB timeouts; the P2016 OSD rejects
+  1080p outright.
 - **mirror** the Mac screen onto HDMI at **720×480 @ 60 Hz** RGB565 (CEA 480p 16:9). 640×480 4:3
   stretched on the Dell; 800×600 RGB332 never locked.
 
@@ -54,6 +55,16 @@ guarantee of 60 distinct video frames per second.
 `mirror` clones the Air. `extend` creates a WindowServer display you can drag windows onto, then
 clones **that** display to HDMI. `CGVirtualDisplay` is a private API and can break on a macOS
 update. Run `extend` from Terminal.app with Screen Recording permission.
+
+The LaunchAgent is currently testing `1024x768@50`: the same HDMI raster and 1280x960 virtual
+desktop at a 54 MHz pixel clock (49.849 Hz actual). This reduces raw traffic from about 94 MB/s to
+79 MB/s. It is a custom timing, not a standard VESA DMT mode; monitor compatibility and long-term
+stability remain under validation. The original `--mode 1024x768` remains 60 Hz/65 MHz. A 256 KiB
+chunking experiment still timed out and was removed from the active transport.
+
+Each session logs a run ID, commit, runtime source/helper hash, HDMI timing, frame/block sizes and
+USB speed/bus/address. Session-end records share the same ID. The source hash also changes for
+uncommitted runtime edits, so source changes can be distinguished from plain service restarts.
 
 Every USB write is checked for its exact byte count. PyUSB/libusb1 can return a partial byte count
 on timeout without raising an exception; such a frame is rejected and never terminated as though it

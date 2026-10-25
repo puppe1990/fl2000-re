@@ -7,7 +7,7 @@ never locked. 1280x720 RGB565 overruns USB 2.0.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 # 720x480 RGB565@60 = 41.5 MB/s. 640x480 held 36.9; 1280x720 at 110 does not.
 USB2_BUDGET_BPS = 42_000_000
@@ -133,6 +133,10 @@ MODE_1024x768 = VideoMode(
     pixclk=1344 * 806 * 60,
 )
 
+# Experimental lower-clock raster: preserve the XGA geometry, use a 54 MHz PLL.
+# 54 MHz / (1344*806) = 49.849 Hz; host cadence rounds to 50. Not a VESA DMT mode.
+MODE_1024x768_50 = replace(MODE_1024x768, freq=50, pll=0x001B2105, pixclk=54_000_000)
+
 # 1920x1080@60 from Fresco's big_table_16bit_r0 (the table the bulk path uses).
 # Raw RGB565 is 4.1 MB/frame = ~249 MB/s: only a SuperSpeed (USB 3) link carries it.
 MODE_1920x1080 = VideoMode(
@@ -220,6 +224,7 @@ NAMED_MODES = {
     "800x600": MODE_800x600,
     "1280x720": MODE_1280x720,
     "1024x768": MODE_1024x768,
+    "1024x768@50": MODE_1024x768_50,
     "1440x900": MODE_1440x900,
     "1920x1080": MODE_1920x1080,
     "1920x1080@30": MODE_1920x1080_30,

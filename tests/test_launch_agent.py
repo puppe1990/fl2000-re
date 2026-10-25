@@ -135,7 +135,7 @@ def test_cmd_extend_agent_shows_the_pointer(monkeypatch):
     import fl2000_re.launch_agent as launch_agent
     import fl2000_re.stream as stream
     from fl2000_re import fl2000_usb
-    from fl2000_re.video_modes import MODE_1024x768
+    from fl2000_re.video_modes import MODE_1024x768_50
 
     monkeypatch.setattr(launch_agent, "wait_for_dongle", lambda *_a, **_k: True)
     monkeypatch.setattr(launch_agent, "unmount_fake_cd", lambda *_a, **_k: None)
@@ -154,7 +154,7 @@ def test_cmd_extend_agent_shows_the_pointer(monkeypatch):
     monkeypatch.setattr(stream, "cmd_extend", fake_extend)
     assert cmd_extend_agent() == 0
     assert seen["cursor"] is True
-    assert seen["mode"] is MODE_1024x768
+    assert seen["mode"] is MODE_1024x768_50
     assert seen["virtual_size"] == launch_agent.VIRTUAL_DESKTOP
     assert launch_agent.VIRTUAL_DESKTOP == (1280, 960)
     assert seen["underscan"] == 1.0

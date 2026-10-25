@@ -16,7 +16,7 @@ from typing import Any
 import usb.core
 
 from fl2000_re.registers import FL2000_USB_PID, FL2000_USB_VID
-from fl2000_re.video_modes import MODE_1024x768
+from fl2000_re.video_modes import MODE_1024x768_50
 
 LABEL = "com.fl2000-re.extend"
 POLL_S = 2.0
@@ -196,14 +196,14 @@ def cmd_extend_agent() -> int:
     from fl2000_re.fl2000_usb import FL2000
     from fl2000_re.stream import EXTEND_CAPTURE_FPS, cmd_extend
 
-    # 1024x768@60 is 65 MHz: the highest mode that stays stable through the
-    # HDMI->VGA adapter. 720p (74 MHz) already flickers; 1440x900 is unusable.
+    # The 65 MHz profile produced confirmed partial USB timeouts on 2026-10-25.
+    # Try the same raster at 54 MHz (~50 Hz), reducing link and feeder demand.
     return cmd_extend(
         FL2000(),
         0,
         1.0,
         1.0,
-        MODE_1024x768,
+        MODE_1024x768_50,
         0,
         "left",
         True,

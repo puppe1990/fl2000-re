@@ -278,3 +278,16 @@ def test_parse_size_rejects_missing_x():
 def test_parse_size_rejects_zero():
     with pytest.raises(ValueError, match="'0x800'"):
         parse_size("0x800")
+
+
+def test_lower_clock_xga_preserves_geometry_and_uses_valid_pll():
+    from fl2000_re.video_modes import MODE_1024x768_50
+
+    mode = resolve_mode("1024x768@50")
+    assert mode is MODE_1024x768_50
+    assert (mode.width, mode.height, mode.bpp) == (1024, 768, 2)
+    assert (mode.h_sync_1, mode.h_sync_2) == (MODE_1024x768.h_sync_1, MODE_1024x768.h_sync_2)
+    assert (mode.v_sync_1, mode.v_sync_2) == (MODE_1024x768.v_sync_1, MODE_1024x768.v_sync_2)
+    assert pll_pixel_clock(mode.pll) == mode.pixclk == 54_000_000
+    assert mode.freq == 50
+    assert mode.pixclk / (1344 * 806) == pytest.approx(50, rel=0.004)
