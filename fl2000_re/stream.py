@@ -8,6 +8,7 @@ import time
 import usb.core
 import usb.util
 
+from fl2000_re.bulk_transfer import send_frame as send_frame
 from fl2000_re.capture import (
     Grabber,
     ScreencaptureError,
@@ -69,7 +70,6 @@ from fl2000_re.fl2000_usb import FL2000
 from fl2000_re.hdmi import bring_up_hdmi
 from fl2000_re.letterbox import UNDERSCAN
 from fl2000_re.pixels import dword_swap_frame, make_bars_rgb565, pack_frame
-from fl2000_re.registers import BULK_EP
 from fl2000_re.stream_metrics import PumpMetrics
 from fl2000_re.stream_metrics import _maybe_print_stats as _maybe_print_stats
 from fl2000_re.stream_metrics import format_stream_stats as format_stream_stats
@@ -119,18 +119,6 @@ def _uptime_s() -> float:
 
 def _read_clocks() -> tuple[float, float]:
     return time.time(), _uptime_s()
-
-
-def send_frame(fl: FL2000, frame: bytes) -> None:
-    # Full-frame bulk rewrite outlasts one scanout, so a changed frame tears
-    # once mid-screen: expected on this single-buffered chip, not a bug.
-    fl.dev.write(BULK_EP, frame, timeout=2000)
-    # The chip's bulk EOF is this zero-length packet (REG_ACLK bit 28), not the
-    # transfer's short packet. The reference driver submits one after EVERY frame;
-    # gating it on 512-byte alignment left non-aligned frames (1440x900) with no
-    # end-of-frame at all (2026-10-23).
-    with contextlib.suppress(usb.core.USBError):
-        fl.dev.write(BULK_EP, b"", timeout=50)
 
 
 def release_bulk(fl: FL2000) -> None:

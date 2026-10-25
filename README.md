@@ -55,6 +55,14 @@ guarantee of 60 distinct video frames per second.
 clones **that** display to HDMI. `CGVirtualDisplay` is a private API and can break on a macOS
 update. Run `extend` from Terminal.app with Screen Recording permission.
 
+Every USB write is checked for its exact byte count. PyUSB/libusb1 can return a partial byte count
+on timeout without raising an exception; such a frame is rejected and never terminated as though it
+were complete. EOF failures are also propagated instead of being hidden. Transfers taking 100 ms or
+more emit `usb_frame_slow` records with separate pixel/EOF timings; failures include the phase and
+expected/actual bytes when available. No failed transfer is retried. A stalled endpoint requires
+unplugging and reconnecting the Hagibis USB-A; higher capture fps does not repair a partial
+transfer.
+
 The USB feeder requests interactive thread scheduling on macOS after starting the capture child
 (which keeps nice(5)). Host pacing includes 5% scheduling headroom while HDMI timing registers
 remain unchanged; every frame still ends with its mandatory ZLP. Startup logs whether interactive
