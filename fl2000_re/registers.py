@@ -21,5 +21,7 @@ REG_USB_CTRL = 0x0078
 I2C_ITE, I2C_DDC = 0x4C, 0x50
 ITE_VENDOR, ITE_DEVICE = 0x4954, 0x612
 BULK_EP = 0x01
+# Both USB 2 (512) and SuperSpeed (1024) packets divide this block exactly.
+BULK_BLOCK_BYTES = 256 * 1024
 
 DUMP_REGS = [0x0070, 0x0078] + list(range(0x8000, 0x8090, 4))

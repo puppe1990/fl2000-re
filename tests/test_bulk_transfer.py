@@ -75,3 +75,42 @@ def test_unexpected_eof_byte_count_is_rejected():
     device = FakeDevice([100, 1])
     with pytest.raises(usb.core.USBError, match="esperado 0"):
         transfer.send_frame(types.SimpleNamespace(dev=device), bytes(100))
+
+
+def test_large_frame_uses_packet_aligned_blocks_and_one_final_eof():
+    from fl2000_re.registers import BULK_BLOCK_BYTES
+
+    frame = bytes(range(256)) * (1024 * 768 * 2 // 256)
+    sizes = [BULK_BLOCK_BYTES] * 6
+    device = FakeDevice([*sizes, 0])
+    transfer.send_frame(types.SimpleNamespace(dev=device), frame)
+    payloads = [call[1] for call in device.calls]
+    assert b"".join(payloads[:-1]) == frame
+    assert [len(p) for p in payloads[:-1]] == sizes
+    assert all(size % 1024 == 0 for size in sizes)
+    assert payloads[-1] == b""
+    assert payloads.count(b"") == 1
+
+
+def test_non_aligned_tail_is_sent_before_mandatory_eof():
+    from fl2000_re.registers import BULK_BLOCK_BYTES
+
+    frame = bytes(BULK_BLOCK_BYTES + 100)
+    device = FakeDevice([BULK_BLOCK_BYTES, 100, 0])
+    transfer.send_frame(types.SimpleNamespace(dev=device), frame)
+    assert [len(c[1]) for c in device.calls] == [BULK_BLOCK_BYTES, 100, 0]
+
+
+def test_partial_middle_block_stops_without_more_pixels_or_eof(capsys):
+    from fl2000_re.registers import BULK_BLOCK_BYTES
+
+    device = FakeDevice([BULK_BLOCK_BYTES, 400])
+    frame = bytes(BULK_BLOCK_BYTES * 3)
+    with pytest.raises(usb.core.USBError, match="Sem retry"):
+        transfer.send_frame(types.SimpleNamespace(dev=device), frame)
+    assert len(device.calls) == 2
+    event = json.loads(capsys.readouterr().out)
+    assert event["sent_bytes"] == BULK_BLOCK_BYTES + 400
+    assert event["block_offset"] == BULK_BLOCK_BYTES
+    assert event["block_sent"] == 400
+    assert event["expected_bytes"] == len(frame)

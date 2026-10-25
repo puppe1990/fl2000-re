@@ -55,6 +55,15 @@ guarantee of 60 distinct video frames per second.
 clones **that** display to HDMI. `CGVirtualDisplay` is a private API and can break on a macOS
 update. Run `extend` from Terminal.app with Screen Recording permission.
 
+Frames are sent in 256 KiB blocks, aligned to both USB 2 and SuperSpeed packet sizes, with only one
+mandatory ZLP after the complete frame. A partial block stops the frame without retry or EOF; its
+diagnostic includes the block offset and cumulative frame byte count. Chunking bounds each host
+transfer; it is not a guarantee that device/controller stalls or physical signal loss are resolved.
+
+Each session logs a run ID, commit, runtime source/helper hash, HDMI timing, frame/block sizes and
+USB speed/bus/address. Session-end records share the same ID. The source hash also changes for
+uncommitted runtime edits, so source changes can be distinguished from plain service restarts.
+
 Every USB write is checked for its exact byte count. PyUSB/libusb1 can return a partial byte count
 on timeout without raising an exception; such a frame is rejected and never terminated as though it
 were complete. EOF failures are also propagated instead of being hidden. Transfers taking 100 ms or
