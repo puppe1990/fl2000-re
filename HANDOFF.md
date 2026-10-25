@@ -22,6 +22,13 @@ Resumo do estado do projeto, do que foi medido no hardware e do que falta. Leia 
 - Ainda é necessário validar estabilidade por tempo maior e compatibilidade na tela física. Não
   afirmar que a redução de clock eliminou os apagões apenas por uma amostra curta sem falhas.
 
+### Resultado da amostra de 50 Hz
+
+Sessão `21cad34649ef`, fontes `8b10858deb35e5f1`: 300 s de observação, 316 amostras, mediana USB
+48,9 fps, zero timeout/quadro parcial/reinício. PLL confirmado em 54 MHz e contador do chip medido a
+~49,98 Hz. Maior chamada USB: 151 ms. Essa amostra curta não comprova eliminação dos apagões;
+confirmação física e observação mais longa continuam pendentes.
+
 ## Objetivo da missão
 
 Deixar a imagem no monitor ligado ao **Hagibis FL2000DX** (`1d5c:2000`) **nítida/legível**. O
