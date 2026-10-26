@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import contextlib
 import json
 import time
 
@@ -61,6 +60,7 @@ from fl2000_re.stream_metrics import PumpMetrics
 from fl2000_re.stream_metrics import _maybe_print_stats as _maybe_print_stats
 from fl2000_re.stream_metrics import format_stream_stats as format_stream_stats
 from fl2000_re.thread_priority import prioritize_usb_thread
+from fl2000_re.usb_pipeline import SyncFrameTransport, make_frame_transport, release_bulk
 from fl2000_re.video_modes import MODE_640x480, VideoMode, default_mirror_mode, needs_usb3
 from fl2000_re.wire_codec import rle_frame_period_s
 
@@ -98,12 +98,6 @@ def wall_minus_uptime_gap(
 
 def woke_from_sleep(gap_s: float, threshold_s: float = WAKE_GAP_S) -> bool:
     return gap_s >= threshold_s
-
-
-def release_bulk(fl: FL2000) -> None:
-    for interface in (1, 0):
-        with contextlib.suppress(usb.core.USBError):
-            usb.util.release_interface(fl.dev, interface)
 
 
 def link_warning(usb_speed: int | None, mode: VideoMode) -> str | None:
@@ -311,6 +305,7 @@ def _pace_clone(
         capture_fps=capture_fps,
     )
     capture.enable_wire_encoding(getattr(fl, "wire_encoder", None))
+    fl.frame_transport = make_frame_transport(fl, send_frame)
     run_id = start_stream_session(fl, mode, display_id, capture._capture_fps)
     capture.run_id = run_id
     capture.start()
@@ -372,6 +367,7 @@ def _pump_paced_frames(
         if getattr(fl, "wire_encoder", None) is not None
         else usb_feed_period_s(mode.freq)
     )
+    transport = getattr(fl, "frame_transport", None) or SyncFrameTransport(fl, send_frame)
     next_tick = t0
     last_log, last_sent = t0, 0
     stat_cap = capture.counter.value
@@ -395,7 +391,9 @@ def _pump_paced_frames(
             )
         frame = capture.snapshot()
         usb_start = time.monotonic()
-        send_frame(fl, frame)
+        delivered = transport.send(
+            frame, getattr(capture, "frame_at", 0.0), getattr(capture, "snapshot_fresh", True)
+        )
         sent += 1
         capture.sent_frames = sent
         now = time.monotonic()
@@ -403,8 +401,8 @@ def _pump_paced_frames(
         pump_metrics.record(
             usb_start,
             now,
-            getattr(capture, "snapshot_fresh", True),
-            getattr(capture, "frame_at", 0.0),
+            delivered.fresh,
+            delivered.frame_at,
         )
         last_log, last_sent, stat_cap = _maybe_print_stats(
             now,

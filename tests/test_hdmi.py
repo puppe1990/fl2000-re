@@ -1,6 +1,7 @@
 """Register programming is verified with a fake USB device; no dongle needed."""
 
 import fl2000_re.hdmi as hdmi
+import pytest
 from fl2000_re.fl2000_usb import FL2000
 from fl2000_re.registers import (
     REG_ACLK,
@@ -9,6 +10,11 @@ from fl2000_re.registers import (
     REQ_READ,
 )
 from fl2000_re.video_modes import MODE_640x480, shift_vsync2
+
+
+@pytest.fixture(autouse=True)
+def isolated_local_burst_profile(monkeypatch):
+    monkeypatch.setattr(hdmi, "stream_bulk_alternate", lambda device: 1)
 
 
 class FakeUSBDevice:

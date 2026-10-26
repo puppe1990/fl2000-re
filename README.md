@@ -194,3 +194,10 @@ clone/extend and never perform USB access. Logs identify the encoder backend.
 selects IF1/alt0 only when its full SuperSpeed companion advertises bulk EP1 with `bMaxBurst=15`.
 Control IF0 stays at alt0 to avoid a duplicate EP1. This is an opt-in throughput experiment for
 larger video payloads; return the file to `single` and restart to restore single-packet bursts.
+
+The local `usb-queue-depth` profile accepts `0` (default synchronous), `2` or `4`. The
+compressed-video experiment uses two immutable prepared pixel/EOF pairs, submitted before waiting
+for completion, so the next transfer is already owned by libusb while Python schedules. Each
+completed phase validates status and exact byte count; errors are never retried. Close
+cancels/drains callbacks before freeing buffers or releasing interfaces. An undrainable queue
+retains its native buffers until process exit. Queue age is included in delivered-frame metrics.
