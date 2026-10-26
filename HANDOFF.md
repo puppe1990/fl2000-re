@@ -40,6 +40,15 @@ correções de calendário. Agora usa CLOCK_MONOTONIC_RAW versus CLOCK_UPTIME_RA
 com intervalo >50 ms. Logs adicionais medem a primeira entrega USB e a primeira captura, sem inferir
 sincronismo físico.
 
+### Observação do transmissor após 21:13
+
+Novo observador separado do pump lê REG_STATUS/PLL e IT66121 SYS_STATUS 0x0E sem SET_CONFIGURATION
+nem troca de banco. Às 21:14:00 registrou `ite_status=0x0C` e `video_stable=false`, com scanout
+49,93 Hz e USB ainda funcionando. Às 21:14:01 voltou a `0x1C`/true, com scanout 49,89 Hz. O bit 4 é
+estabilidade do vídeo de entrada segundo o driver Linux ite-it66121. Isso é uma falha de
+estabilidade observável mesmo sem timeout USB, mas não comprova a duração do apagão físico depois do
+adaptador VGA. O observador mantém heartbeat a cada 10 s e registra mudanças na amostragem de 1 s.
+
 ## Objetivo da missão
 
 Deixar a imagem no monitor ligado ao **Hagibis FL2000DX** (`1d5c:2000`) **nítida/legível**. O

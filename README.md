@@ -86,6 +86,14 @@ real detected wake logs the measured gap. Each session also logs the first succe
 the first live captured frame, including their elapsed times from pump startup. These events
 describe software delivery; they do not measure when the physical monitor locks.
 
+An isolated low-priority observer samples REG_STATUS, the PLL register and IT66121 status 0x0E once
+per second after mode setup. It never calls SET_CONFIGURATION or writes video mode/bank registers.
+It logs input-video stability (bit 4), HPD/RxSense, chip scanout fps and status changes immediately,
+plus a heartbeat every ten seconds. Its I2C/USB reads stay outside the bulk feeder; observer errors
+are logged without stopping video. The observer is stopped before USB teardown. These fields cannot
+observe the analog image downstream of an HDMI→VGA adapter. HPD/RxSense were already unreliable on
+this dongle, so unchanged values do not prove the physical screen stayed on.
+
 The live log separates capture, scaling and packing costs, reports the requested and budget-limited
 capture rates, and counts delivered captures (`novas`) separately from USB repeats (`repetidas`).
 `novas` counts consumed capture generations, including captures of unchanged content; it does not

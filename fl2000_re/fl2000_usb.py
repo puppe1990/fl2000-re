@@ -37,6 +37,7 @@ class FL2000:
         dev: Any | None = None,
         *,
         find_device: Callable[..., Any] = usb.core.find,
+        configure: bool = True,
     ) -> None:
         self.dev = (
             dev
@@ -45,8 +46,9 @@ class FL2000:
         )
         if self.dev is None:
             raise DongleNotFoundError
-        with contextlib.suppress(usb.core.USBError):
-            self.dev.set_configuration()
+        if configure:
+            with contextlib.suppress(usb.core.USBError):
+                self.dev.set_configuration()
 
     def describe(self) -> None:
         cfg = self.dev.get_active_configuration()

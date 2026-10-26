@@ -56,18 +56,13 @@ from fl2000_re.capture_pacing import (
 )
 from fl2000_re.capture_process import MAX_CAPTURE_RESTARTS, CaptureProcess
 from fl2000_re.capture_worker import _capture_child as _capture_child
-from fl2000_re.capture_worker import (
-    _retune_from_live_pointer as _retune_from_live_pointer,
-)
-from fl2000_re.capture_worker import (
-    hdmi_capture_worker as hdmi_capture_worker,
-)
-from fl2000_re.capture_worker import (
-    lower_capture_priority as lower_capture_priority,
-)
+from fl2000_re.capture_worker import _retune_from_live_pointer as _retune_from_live_pointer
+from fl2000_re.capture_worker import hdmi_capture_worker as hdmi_capture_worker
+from fl2000_re.capture_worker import lower_capture_priority as lower_capture_priority
 from fl2000_re.fl2000_usb import FL2000
 from fl2000_re.hdmi import bring_up_hdmi
 from fl2000_re.letterbox import UNDERSCAN
+from fl2000_re.link_watch import start_link_watch, stop_link_watch
 from fl2000_re.pixels import dword_swap_frame, make_bars_rgb565, pack_frame
 from fl2000_re.session_log import end_stream_session, record_frame_ready, start_stream_session
 from fl2000_re.sleep_clock import read_sleep_clocks as _read_clocks
@@ -322,6 +317,7 @@ def _pace_clone(
     run_id = start_stream_session(fl, mode, display_id, capture._capture_fps)
     capture.run_id = run_id
     capture.start()
+    link_watch = start_link_watch(fl.dev, run_id, mode.freq)
     qos = "ativa" if prioritize_usb_thread() else "indisponivel"
     print(
         f"  prioridade interativa da thread USB: {qos}; margem de envio {(USB_FEED_LEAD - 1) * 100:.0f}%."
@@ -346,6 +342,7 @@ def _pace_clone(
         print(f"  {exc}", flush=True)
         rc = 1
     finally:
+        stop_link_watch(link_watch)
         sent = capture.sent_frames
         capture.stop_and_join()
         dt = max(0.001, time.monotonic() - t0)
