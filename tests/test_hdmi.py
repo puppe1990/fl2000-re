@@ -142,3 +142,25 @@ def test_other_platforms_keep_original_bulk_selection(monkeypatch):
     monkeypatch.setattr(hdmi.usb.util, "claim_interface", lambda dev, i: None)
     assert hdmi._claim_bulk_alt1(FL2000(dev=device, configure=False)) == 0
     assert calls == [(0, 1)]
+
+
+def test_unavailable_streaming_interface_does_not_change_alternates(monkeypatch):
+    import types
+
+    calls = []
+    device = types.SimpleNamespace(
+        speed=4,
+        get_active_configuration=lambda: [_SinglePacketBulkAlt()],
+        set_interface_altsetting=lambda i, alt: calls.append(("alt", i, alt)),
+        clear_halt=lambda ep: calls.append(("clear", ep)),
+    )
+
+    def claim(dev, interface):
+        calls.append(("claim", interface))
+        if interface == 1:
+            raise hdmi.usb.core.USBError("streaming interface busy")
+
+    monkeypatch.setattr(hdmi.sys, "platform", "darwin")
+    monkeypatch.setattr(hdmi.usb.util, "claim_interface", claim)
+    assert hdmi._claim_bulk_alt1(FL2000(dev=device, configure=False)) == 1
+    assert calls == [("claim", 0), ("claim", 1)]

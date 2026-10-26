@@ -107,14 +107,7 @@ def _claim_bulk_alt1(fl: FL2000) -> int:
     try:
         with contextlib.suppress(usb.core.USBError):
             usb.util.claim_interface(fl.dev, 0)
-        if sys.platform == "darwin" and _has_single_packet_bulk_alt(fl.dev):
-            usb.util.claim_interface(fl.dev, 1)
-            # Remove duplicate EP1 so PyUSB selects the single-packet stream.
-            fl.dev.set_interface_altsetting(0, 0)
-            fl.dev.set_interface_altsetting(1, 1)
-            print("  USB bulk: interface 1 alt 1, rajada maxima de 1 pacote (teste).")
-        else:
-            fl.dev.set_interface_altsetting(0, 1)
+        _select_video_bulk_alt(fl)
     except usb.core.USBError as exc:
         print(
             f"  USB claim falhou ({exc}). Desconecta e reconecta o USB-A do HAGIBIS e rode de novo."
@@ -125,7 +118,18 @@ def _claim_bulk_alt1(fl: FL2000) -> int:
     return 0
 
 
-def _has_single_packet_bulk_alt(device) -> bool:
+def _select_video_bulk_alt(fl: FL2000) -> None:
+    if sys.platform != "darwin" or not _has_single_packet_bulk_alt(fl.dev):
+        fl.dev.set_interface_altsetting(0, 1)
+        return
+    usb.util.claim_interface(fl.dev, 1)
+    # Remove duplicate EP1 so PyUSB selects the single-packet stream.
+    fl.dev.set_interface_altsetting(0, 0)
+    fl.dev.set_interface_altsetting(1, 1)
+    print("  USB bulk: interface 1 alt 1, rajada maxima de 1 pacote (teste).")
+
+
+def _has_single_packet_bulk_alt(device: usb.core.Device) -> bool:
     if getattr(device, "speed", 0) < 4:
         return False
     interfaces = (
