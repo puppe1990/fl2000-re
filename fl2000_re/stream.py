@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import contextlib
+import json
 import time
 
 import usb.core
@@ -54,9 +55,7 @@ from fl2000_re.capture_pacing import (
     snapped_pointer as snapped_pointer,
 )
 from fl2000_re.capture_process import MAX_CAPTURE_RESTARTS, CaptureProcess
-from fl2000_re.capture_worker import (
-    _capture_child as _capture_child,
-)
+from fl2000_re.capture_worker import _capture_child as _capture_child
 from fl2000_re.capture_worker import (
     _retune_from_live_pointer as _retune_from_live_pointer,
 )
@@ -70,7 +69,8 @@ from fl2000_re.fl2000_usb import FL2000
 from fl2000_re.hdmi import bring_up_hdmi
 from fl2000_re.letterbox import UNDERSCAN
 from fl2000_re.pixels import dword_swap_frame, make_bars_rgb565, pack_frame
-from fl2000_re.session_log import end_stream_session, start_stream_session
+from fl2000_re.session_log import end_stream_session, record_frame_ready, start_stream_session
+from fl2000_re.sleep_clock import read_sleep_clocks as _read_clocks
 from fl2000_re.stream_metrics import PumpMetrics
 from fl2000_re.stream_metrics import _maybe_print_stats as _maybe_print_stats
 from fl2000_re.stream_metrics import format_stream_stats as format_stream_stats
@@ -100,7 +100,9 @@ class CaptureDeadError(RuntimeError):
 def wall_minus_uptime_gap(
     wall_now: float, uptime_now: float, wall_prev: float, uptime_prev: float
 ) -> float:
-    """Wall clock minus CLOCK_UPTIME_RAW. Sleep pauses uptime; wall keeps going.
+    """Elapsed continuous clock minus awake uptime; retained name for compatibility.
+
+    Inputs must be monotonic clock samples, never time.time() (NTP can step it).
 
     Example: wall_minus_uptime_gap(130, 50.2, 100, 50) == 29.8
     """
@@ -109,17 +111,6 @@ def wall_minus_uptime_gap(
 
 def woke_from_sleep(gap_s: float, threshold_s: float = WAKE_GAP_S) -> bool:
     return gap_s >= threshold_s
-
-
-def _uptime_s() -> float:
-    raw = getattr(time, "CLOCK_UPTIME_RAW", None)
-    if raw is None:
-        return time.monotonic()
-    return time.clock_gettime(raw)
-
-
-def _read_clocks() -> tuple[float, float]:
-    return time.time(), _uptime_s()
 
 
 def release_bulk(fl: FL2000) -> None:
@@ -329,6 +320,7 @@ def _pace_clone(
         capture_fps=capture_fps,
     )
     run_id = start_stream_session(fl, mode, display_id, capture._capture_fps)
+    capture.run_id = run_id
     capture.start()
     qos = "ativa" if prioritize_usb_thread() else "indisponivel"
     print(
@@ -407,6 +399,7 @@ def _pump_paced_frames(
         sent += 1
         capture.sent_frames = sent
         now = time.monotonic()
+        record_frame_ready(capture, sent, now - t0)
         pump_metrics.record(
             usb_start,
             now,
@@ -455,14 +448,31 @@ def _ensure_capture(
     return True, capture.counter.value, now
 
 
-def _raise_if_woke(wall_prev: float, up_prev: float) -> tuple[float, float]:
-    wall, up = _read_clocks()
-    if woke_from_sleep(wall_minus_uptime_gap(wall, up, wall_prev, up_prev)):
+def _raise_if_woke(
+    wall_prev: float | None, up_prev: float | None
+) -> tuple[float | None, float | None]:
+    continuous, awake = _read_clocks()
+    if continuous is None or awake is None:
+        return wall_prev, up_prev
+    if wall_prev is None or up_prev is None:
+        return continuous, awake
+    gap = wall_minus_uptime_gap(continuous, awake, wall_prev, up_prev)
+    if woke_from_sleep(gap):
+        print(
+            json.dumps(
+                {
+                    "event": "system_wake_detected",
+                    "sleep_gap_s": round(gap, 3),
+                    "clock_source": "monotonic_raw_minus_uptime_raw",
+                }
+            ),
+            flush=True,
+        )
         raise SystemWakeError(
             "macOS saiu do descanso. O FL2000 perde o HDMI no sleep; "
             "saindo para o LaunchAgent religar (ou rode ./bin/extend)."
         )
-    return wall, up
+    return continuous, awake
 
 
 def _capture_parked(capture) -> bool:

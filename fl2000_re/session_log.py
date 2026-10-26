@@ -7,9 +7,16 @@ import json
 import subprocess
 import uuid
 from pathlib import Path
+from typing import Protocol
 
 from fl2000_re.fl2000_usb import FL2000
 from fl2000_re.video_modes import VideoMode
+
+
+class CaptureReadiness(Protocol):
+    run_id: str | None
+    first_capture_logged: bool
+    snapshot_fresh: bool
 
 
 def source_fingerprint(root: Path) -> str:
@@ -102,3 +109,36 @@ def end_stream_session(run_id: str, exit_code: int, sent: int, elapsed_s: float)
         ),
         flush=True,
     )
+
+
+def record_frame_ready(capture: CaptureReadiness, sent: int, elapsed_s: float) -> None:
+    """Report first transport and first live capture delivery for one session.
+
+    Example: record_frame_ready(capture, 1, 0.02)
+    """
+    run_id = getattr(capture, "run_id", None)
+    if run_id is None:
+        return
+    if sent == 1:
+        print(
+            json.dumps(
+                {
+                    "event": "stream_first_frame_sent",
+                    "run_id": run_id,
+                    "elapsed_ms": round(elapsed_s * 1000, 1),
+                }
+            ),
+            flush=True,
+        )
+    if not getattr(capture, "first_capture_logged", False) and capture.snapshot_fresh:
+        capture.first_capture_logged = True
+        print(
+            json.dumps(
+                {
+                    "event": "stream_first_capture_sent",
+                    "run_id": run_id,
+                    "elapsed_ms": round(elapsed_s * 1000, 1),
+                }
+            ),
+            flush=True,
+        )

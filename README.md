@@ -80,6 +80,12 @@ remain unchanged; every frame still ends with its mandatory ZLP. Startup logs wh
 thread priority was accepted and the feed margin. This reduces sensitivity to scheduler delays but
 does not guarantee a stable physical HDMI/VGA signal.
 
+Wake detection compares two monotonic macOS clocks (one advances during sleep, the other does not),
+so a wall-clock correction cannot be mistaken for waking. Interrupted clock sampling is ignored. A
+real detected wake logs the measured gap. Each session also logs the first successful USB frame and
+the first live captured frame, including their elapsed times from pump startup. These events
+describe software delivery; they do not measure when the physical monitor locks.
+
 The live log separates capture, scaling and packing costs, reports the requested and budget-limited
 capture rates, and counts delivered captures (`novas`) separately from USB repeats (`repetidas`).
 `novas` counts consumed capture generations, including captures of unchanged content; it does not

@@ -40,6 +40,8 @@ class CaptureProcess:
         self._restarts_left = restarts_left
         self._capture_fps = mode.freq if capture_fps is None else capture_fps
         self.sent_frames = 0
+        self.run_id: str | None = None
+        self.first_capture_logged = False
         self.n = len(frame)
         self.shm = new_shared_frame(frame)
         self.frame_lock = mp.Lock()
