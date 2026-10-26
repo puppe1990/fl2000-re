@@ -29,6 +29,17 @@ Sessão `21cad34649ef`, fontes `8b10858deb35e5f1`: 300 s de observação, 316 am
 ~49,98 Hz. Maior chamada USB: 151 ms. Essa amostra curta não comprova eliminação dos apagões;
 confirmação física e observação mais longa continuam pendentes.
 
+### Pausas posteriores e relógio de suspensão
+
+O perfil de 50 Hz também teve timeout USB em 25/10 às 20:53:35 (1230848/1572864 bytes; 2,242 s),
+seguido de nova sessão às 20:53:40. Portanto, a amostra inicial sem erros não comprovou
+estabilidade. Houve outro reinício por suposta saída do descanso às 20:40:39, sem evento Sleep/Wake
+correspondente no recorte de `pmset -g log`. Não foi comprovado que esse reinício específico era
+falso, mas o detector tinha uma vulnerabilidade: comparava `time.time()` com uptime e podia reagir a
+correções de calendário. Agora usa CLOCK_MONOTONIC_RAW versus CLOCK_UPTIME_RAW, descartando leituras
+com intervalo >50 ms. Logs adicionais medem a primeira entrega USB e a primeira captura, sem inferir
+sincronismo físico.
+
 ## Objetivo da missão
 
 Deixar a imagem no monitor ligado ao **Hagibis FL2000DX** (`1d5c:2000`) **nítida/legível**. O

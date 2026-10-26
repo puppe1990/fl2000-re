@@ -61,3 +61,22 @@ def test_session_logging_survives_unreadable_source(monkeypatch, capsys):
     monkeypatch.setattr(sessions, "git_revision", lambda root: "unknown")
     sessions.start_stream_session(types.SimpleNamespace(dev=object()), MODE_1024x768, None, 20)
     assert json.loads(capsys.readouterr().out)["source_hash"] == "unavailable"
+
+
+def test_first_frame_and_live_capture_delivery_are_logged_once(capsys):
+    capture = types.SimpleNamespace(
+        run_id="session", snapshot_fresh=False, first_capture_logged=False
+    )
+    sessions.record_frame_ready(capture, 1, 0.02)
+    capture.snapshot_fresh = True
+    sessions.record_frame_ready(capture, 2, 0.5)
+    sessions.record_frame_ready(capture, 3, 0.6)
+    events = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
+    assert [e["event"] for e in events] == ["stream_first_frame_sent", "stream_first_capture_sent"]
+    assert [e["elapsed_ms"] for e in events] == [20, 500]
+    assert capture.first_capture_logged
+
+
+def test_frame_logging_skips_unidentified_test_or_legacy_captures(capsys):
+    sessions.record_frame_ready(types.SimpleNamespace(), 1, 0.02)
+    assert capsys.readouterr().out == ""
