@@ -156,3 +156,15 @@ difference alone does not establish a cause of the earlier partial timeouts.
 Selection is restricted to macOS SuperSpeed devices whose IF1/alt1 bulk EP1 includes the complete
 single-packet SuperSpeed companion descriptor. Other platforms, USB 2 and unsupported/missing
 descriptors keep the original control-interface route.
+
+The persistent fault listener (`python -m fl2000_re.fault_listener`) follows the extend log and
+writes `~/Library/Logs/fl2000-re-faults.jsonl`. Each captured USB failure records its run/source,
+twenty recent HDMI states and eight transport-stat lines, then queries the persisted macOS kernel
+window for the same device/endpoint. It never opens or configures USB. Unlike a live `log stream`
+alone, this also recovers kernel records that were not delivered to the live stream.
+
+The follower reassembles partial UTF-8 writes and handles rename/copy-truncate rotation. Existing
+records seed context without replaying old faults. Application evidence is written before the
+bounded kernel query, so query failure cannot erase the fault. `listener_plist()` renders the
+per-user KeepAlive LaunchAgent `com.fl2000-re.usb-listener`. A running listener confirms captured
+transport failures; it cannot directly inspect the analog image after HDMI→VGA.
