@@ -219,3 +219,8 @@ Session records identify actual transport, queue depth and selected burst size. 
 the latest compression size/backend. A saturated 16-bit scanout counter reports unknown scanout
 rate/running state rather than a false zero-frame-rate outage; bridge stability remains
 independently observed.
+
+The listener also writes `hdmi_instability_bundle` when the bridge changes from stable to unstable,
+retaining recent transport/compression context. Startup and repeated unstable heartbeats do not
+create duplicate alarms. These bridge events do not launch kernel queries and cannot directly prove
+what was visible on VGA.

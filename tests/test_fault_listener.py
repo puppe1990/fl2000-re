@@ -144,3 +144,30 @@ def test_fault_bundle_keeps_compression_size_and_resets_it_for_new_run():
     assert fault["wire_compression"]["wire_bytes"] == 849396
     context.consume(line({"event": "stream_session_start", "run_id": "second"}))
     assert context.consume(line({"event": "usb_transfer_error"}))["wire_compression"] == {}
+
+
+def test_listener_captures_each_sync_loss_without_startup_or_heartbeat_false_alarms():
+    context = listener.FaultContext()
+    context.consume(line({"event": "stream_session_start", "run_id": "video"}))
+    state = {"event": "hdmi_link_state", "video_stable": False}
+    assert context.consume(line(state)) is None
+    assert context.consume(line(state)) is None
+    state["video_stable"] = True
+    assert context.consume(line(state)) is None
+    state["video_stable"] = False
+    bundle = context.consume(line(state))
+    assert bundle["event"] == "hdmi_instability_bundle"
+    assert bundle["session"]["run_id"] == "video"
+    assert bundle["fault_at"] == "2026-10-26 15:42:08"
+    assert context.consume(line(state)) is None
+
+
+def test_hdmi_instability_is_persisted_without_sleeping_or_querying_kernel(tmp_path):
+    output = tmp_path / "faults"
+    bundle = {"event": "hdmi_instability_bundle", "bundle_id": "blink"}
+
+    def forbidden(*args):
+        raise AssertionError("HDMI blips must not launch expensive kernel queries")
+
+    listener._capture_fault(bundle, output, forbidden, forbidden)
+    assert json.loads(output.read_text()) == bundle
