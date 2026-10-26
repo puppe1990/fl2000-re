@@ -1331,7 +1331,7 @@ def test_rle_pump_keeps_raster_cadence_and_eof_even_for_tiny_frames(monkeypatch,
     raster_hz = pll_pixel_clock(MODE_1024x768.pll) / (1344 * 806)
     assert raster_hz * 10 <= sent < raster_hz * 10 + 1
     assert len(fl.dev.packets) == sent * 2
-    assert all(len(packet) == 8 for packet in fl.dev.packets[::2])
+    assert all(len(packet) == 12 for packet in fl.dev.packets[::2])
     assert all(packet == b"" for packet in fl.dev.packets[1::2])
     if changing:
         assert fl.dev.packets[0] != fl.dev.packets[2]

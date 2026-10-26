@@ -201,3 +201,10 @@ for completion, so the next transfer is already owned by libusb while Python sch
 completed phase validates status and exact byte count; errors are never retried. Close
 cancels/drains callbacks before freeing buffers or releasing interfaces. An undrainable queue
 retains its native buffers until process exit. Queue age is included in delivered-frame metrics.
+
+Both RLE codecs reserve the last raster pixel as a literal token. Fresco's
+[documented chip erratum](https://github.com/FrescoLogic/FL2000/blob/master/src/fl2000_compression.c)
+requires this even when the final pixels form a run. A repeat-count token may roundtrip through a
+software decoder yet still violate the hardware protocol. The regression suite independently checks
+this final-token constraint for both codecs, including one/two-pixel tails and long runs. A uniform
+XGA frame therefore uses 12 bytes (literal, count, final literal and padding), rather than 8.

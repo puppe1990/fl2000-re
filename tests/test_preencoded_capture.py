@@ -34,7 +34,7 @@ def test_prepared_frame_skips_encoding_and_keeps_explicit_eof(monkeypatch):
     monkeypatch.setattr(wire_codec, "_encode_runs", lambda _: pytest.fail("encoding on USB"))
     for _ in range(4):
         send_frame(fl, capture.snapshot())
-    assert [len(packet) for packet in packets] == [8, 0] * 4
+    assert [len(packet) for packet in packets] == [12, 0] * 4
 
 
 def test_variable_length_publication_is_complete_and_busy_writer_keeps_last():

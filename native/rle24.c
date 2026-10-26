@@ -34,8 +34,13 @@ size_t fl2000_encode_rle24(const uint8_t *src, size_t count,
             ++end;
         uint32_t value = literal(color);
         token(out, &offset, value);
-        if (end - start > 1)
+        /* Chip erratum: a compressed raster must end with a literal pixel. */
+        if (end == count && end - start > 2) {
+            token(out, &offset, (uint32_t)(end - start - 2));
+            token(out, &offset, value);
+        } else if (end - start > 1) {
             token(out, &offset, end - start == 2 ? value : (uint32_t)(end - start - 1));
+        }
         start = end;
     }
     while (offset % 4)

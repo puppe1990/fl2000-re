@@ -109,7 +109,8 @@ def _encode_runs(pixels: np.ndarray) -> bytes:
     counts = np.diff(np.r_[starts, pixels.size])
     repeated = counts > 1
     positions = np.arange(starts.size) + np.r_[0, np.cumsum(repeated[:-1])]
-    tokens = np.empty(starts.size + np.count_nonzero(repeated), dtype=np.uint32)
+    final_literal = counts[-1] > 2
+    tokens = np.empty(starts.size + np.count_nonzero(repeated) + final_literal, dtype=np.uint32)
     literals = _rgb565_literal_words(pixels[starts])
     tokens[positions] = literals
     # A two-pixel run costs the same as two literals. Avoid a trailing count=1,
@@ -117,6 +118,10 @@ def _encode_runs(pixels: np.ndarray) -> bytes:
     tokens[positions[repeated] + 1] = np.where(
         counts[repeated] == 2, literals[repeated], counts[repeated] - 1
     )
+    # Fresco documents a hardware bug: the compressed raster MUST end with a
+    # literal pixel, never a repeat count. Keep the last pixel outside its run.
+    if final_literal:
+        tokens[-2], tokens[-1] = counts[-1] - 2, literals[-1]
     octets = ((tokens[:, None] >> np.array([0, 8, 16])) & 255).astype(np.uint8).tobytes()
     # The vendor pads to dword alignment with 0x80; the decoder stops at the
     # configured raster size. Preserve the ordinary FL2000 64-bit lane order.
