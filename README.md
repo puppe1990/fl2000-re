@@ -167,4 +167,12 @@ The follower reassembles partial UTF-8 writes and handles rename/copy-truncate r
 records seed context without replaying old faults. Application evidence is written before the
 bounded kernel query, so query failure cannot erase the fault. `listener_plist()` renders the
 per-user KeepAlive LaunchAgent `com.fl2000-re.usb-listener`. A running listener confirms captured
-transport failures; it cannot directly inspect the analog image after HDMI→VGA.
+transport failures; it cannot directly inspect the analog image after HDMI→VGA. An opt-in
+`usb-wire-codec` profile in `~/Library/Application Support/fl2000-re/` accepts `raw` (default) or
+`rle24`. The latter groups identical RGB565 pixels in an independently implemented FL2000 RGB888/RLE
+stream. It preserves all original RGB565 bits and the selected resolution; it does not apply
+approximate color masks. Static frames reuse the encoded payload. Every payload still ends with an
+explicit zero-length transfer. Encoding may increase traffic for high-entropy images, and hardware
+stability is experimental. Compressed frames use the actual PLL raster period to avoid accumulating
+a queue of tiny repeated frames. Return the profile to `raw` and restart the agent to restore the
+original transport.
