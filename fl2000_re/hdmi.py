@@ -106,12 +106,14 @@ def _claim_bulk_alt1(fl: FL2000) -> int:
     try:
         with contextlib.suppress(usb.core.USBError):
             usb.util.claim_interface(fl.dev, 0)
-        usb.util.claim_interface(fl.dev, 1)
-        # This alternate exposes EP1 bulk with bMaxBurst=0 instead of 15.
-        # Disable the duplicate EP1 on control IF0 so PyUSB selects streaming IF1.
-        fl.dev.set_interface_altsetting(0, 0)
-        fl.dev.set_interface_altsetting(1, 1)
-        print("  USB bulk: interface 1 alt 1, rajada maxima de 1 pacote (teste).")
+        if _has_single_packet_bulk_alt(fl.dev):
+            usb.util.claim_interface(fl.dev, 1)
+            # Remove duplicate EP1 so PyUSB selects the single-packet stream.
+            fl.dev.set_interface_altsetting(0, 0)
+            fl.dev.set_interface_altsetting(1, 1)
+            print("  USB bulk: interface 1 alt 1, rajada maxima de 1 pacote (teste).")
+        else:
+            fl.dev.set_interface_altsetting(0, 1)
     except usb.core.USBError as exc:
         print(
             f"  USB claim falhou ({exc}). Desconecta e reconecta o USB-A do HAGIBIS e rode de novo."
@@ -120,3 +122,21 @@ def _claim_bulk_alt1(fl: FL2000) -> int:
     with contextlib.suppress(usb.core.USBError):
         fl.dev.clear_halt(BULK_EP)
     return 0
+
+
+def _has_single_packet_bulk_alt(device) -> bool:
+    if getattr(device, "speed", 0) < 4:
+        return False
+    interfaces = (
+        i
+        for i in device.get_active_configuration()
+        if (i.bInterfaceNumber, i.bAlternateSetting) == (1, 1)
+    )
+    endpoints = (ep for interface in interfaces for ep in interface)
+    return any(
+        ep.bEndpointAddress == BULK_EP
+        and ep.bmAttributes & 3 == 2
+        and len(ep.extra_descriptors) >= 6
+        and bytes(ep.extra_descriptors)[:3] == b"\x06\x30\x00"
+        for ep in endpoints
+    )
