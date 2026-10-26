@@ -20,6 +20,7 @@ from fl2000_re.frame_buffer import write_shared_frame
 from fl2000_re.motion_capture import MotionCapture
 from fl2000_re.pixels import pack_frame
 from fl2000_re.stream_metrics import CaptureTimings, SharedCaptureMetrics
+from fl2000_re.wire_codec import Rle24Encoder
 
 
 def hdmi_capture_worker(
@@ -39,6 +40,7 @@ def hdmi_capture_worker(
     idle_flag=None,
     frame_lock=None,
     metrics: SharedCaptureMetrics | None = None,
+    wire_length=None,
 ) -> None:
     """Fill shm with a packed HDMI frame; never touches USB.
 
@@ -58,6 +60,7 @@ def hdmi_capture_worker(
     moved_at = next_tick
     bounds = _virtual_display_bounds(display_id)
     previous_rgb = previous_packed = None
+    wire_encoder = Rle24Encoder(width * height) if wire_length is not None else None
     while not stop.is_set():
         if target_fps:
             if display_id is not None and bounds is None:
@@ -77,13 +80,15 @@ def hdmi_capture_worker(
                 idle_flag.value = 0
         pack_start = time.perf_counter()
         packed = previous_packed if rgb is previous_rgb else pack_frame(rgb, bpp)
-        pack_ms = (time.perf_counter() - pack_start) * 1000
         previous_rgb, previous_packed = rgb, packed
+        if len(packed) != n:
+            continue
+        if wire_encoder is not None:
+            packed = wire_encoder.encode(packed)
+        pack_ms = (time.perf_counter() - pack_start) * 1000
         grab_s = time.perf_counter() - t0
         if grab_ms is not None:
             grab_ms.value = grab_s * 1000
-        if len(packed) != n:
-            continue
         requested_period = period
         period = max(period, grab_s * 1.25) if period else 0.0
         extra = capture_backoff_s(grab_s)
@@ -108,6 +113,8 @@ def hdmi_capture_worker(
                     captured_at,
                 )
             write_shared_frame(buf, packed)
+            if wire_length is not None:
+                wire_length.value = len(packed)
             counter.value += 1
         if extra:
             time.sleep(extra)

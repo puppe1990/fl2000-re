@@ -31,6 +31,13 @@ def wire_codec_profile(path: Path | None = None) -> str:
     return value
 
 
+class EncodedWireFrame(bytes):
+    """Complete RLE payload prepared by the isolated capture child.
+
+    Example: EncodedWireFrame(payload) bypasses RGB565 re-encoding in USB.
+    """
+
+
 class Rle24Encoder:
     """Cache and encode immutable complete RGB565 frames, never partial damage.
 
@@ -46,6 +53,11 @@ class Rle24Encoder:
         self._frames = 0
 
     def encode(self, frame: bytes) -> bytes:
+        if isinstance(frame, EncodedWireFrame):
+            self._source = None
+            self._wire = frame
+            self._report_wire_size()
+            return frame
         if len(frame) != self.pixel_count * 2:
             raise ValueError(f"RGB565 frame bytes={len(frame)}; expected {self.pixel_count * 2}")
         if frame is not self._source and frame != self._source:

@@ -310,6 +310,7 @@ def _pace_clone(
         restarts_left=restart_budget,
         capture_fps=capture_fps,
     )
+    capture.enable_wire_encoding(getattr(fl, "wire_encoder", None))
     run_id = start_stream_session(fl, mode, display_id, capture._capture_fps)
     capture.run_id = run_id
     capture.start()
@@ -363,8 +364,7 @@ def _pump_paced_frames(
     label: str,
     cursor: bool,
 ) -> int:
-    # Continuous stream: bulk idle starves the line buffer and the sink
-    # blanks/resyncs (screen off/on). Never skip ticks, even unchanged.
+    # Bulk idle starves the line buffer: resend even unchanged frames.
     sent = 0
     end_at = None if seconds <= 0 else t0 + seconds
     period = (

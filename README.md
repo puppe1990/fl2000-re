@@ -176,3 +176,10 @@ explicit zero-length transfer. Encoding may increase traffic for high-entropy im
 stability is experimental. Compressed frames use the actual PLL raster period to avoid accumulating
 a queue of tiny repeated frames. Return the profile to `raw` and restart the agent to restore the
 original transport.
+
+For clone/extend, RLE encoding runs inside the existing isolated capture child. The USB feeder
+receives tagged, complete compressed payloads through a bounded shared buffer sized for the
+worst-case RGB888/RLE expansion. Length, content and generation publish under the same lock; the
+feeder only tries that lock without waiting and keeps its previous complete payload if the writer is
+busy. Encoding, scaling or capture stalls therefore do not block repeated USB frames or their
+mandatory EOF. The initial frame is encoded once before the timed pump starts.

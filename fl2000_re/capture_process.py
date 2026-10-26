@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import contextlib
+import ctypes
 import multiprocessing as mp
 
 from fl2000_re.capture_worker import _capture_child
 from fl2000_re.frame_buffer import new_shared_frame
 from fl2000_re.stream_metrics import SharedCaptureMetrics
 from fl2000_re.video_modes import VideoMode
+from fl2000_re.wire_codec import EncodedWireFrame, Rle24Encoder
 
 MAX_CAPTURE_RESTARTS = 5
 
@@ -42,6 +44,7 @@ class CaptureProcess:
         self.sent_frames = 0
         self.run_id: str | None = None
         self.first_capture_logged = False
+        self.wire_length = None
         self.n = len(frame)
         self.shm = new_shared_frame(frame)
         self.frame_lock = mp.Lock()
@@ -59,6 +62,21 @@ class CaptureProcess:
         self.stop = mp.Event()
         self.proc = None
         self._baseline = self.counter.value
+
+    def enable_wire_encoding(self, encoder: Rle24Encoder | None) -> None:
+        """Prepare variable-size publication before spawning the capture child.
+
+        Example: capture.enable_wire_encoding(fl.wire_encoder)
+        """
+        if encoder is None:
+            return
+        if self.proc is not None:
+            raise RuntimeError("capture already started; enable wire encoding before start()")
+        seed = EncodedWireFrame(encoder.encode(self._last_complete_frame))
+        self.shm = mp.RawArray("B", encoder.pixel_count * 3 + 4)
+        ctypes.memmove(self.shm, seed, len(seed))
+        self.wire_length = mp.RawValue("i", len(seed))
+        self._last_complete_frame = seed
 
     def start(self) -> None:
         self._baseline = self.counter.value
@@ -83,6 +101,7 @@ class CaptureProcess:
             self.idle,
             self.frame_lock,
             self.metrics,
+            self.wire_length,
         )
 
     def alive(self) -> bool:
@@ -110,7 +129,12 @@ class CaptureProcess:
             generation = self.counter.value
             if generation == self._last_snapshot_counter:
                 return self._last_complete_frame
-            self._last_complete_frame = bytes(self.buffer())
+            if self.wire_length is None:
+                self._last_complete_frame = bytes(self.buffer())
+            else:
+                self._last_complete_frame = EncodedWireFrame(
+                    ctypes.string_at(ctypes.addressof(self.buffer()), self.wire_length.value)
+                )
             self._last_snapshot_counter = generation
             self.snapshot_fresh = True
             self.frame_at = self.metrics.values[9]
