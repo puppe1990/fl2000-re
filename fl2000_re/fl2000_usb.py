@@ -22,7 +22,6 @@ from fl2000_re.registers import (
 )
 
 if TYPE_CHECKING:
-    from fl2000_re.native_frame import NativeFrameSender
     from fl2000_re.wire_codec import Rle24Encoder
 
 
@@ -44,7 +43,6 @@ class FL2000:
         configure: bool = True,
     ) -> None:
         self.wire_encoder: Rle24Encoder | None = None
-        self.native_frame_sender: NativeFrameSender | None = None
         self.bulk_burst_packets: int | None = None
         self.dev = (
             dev

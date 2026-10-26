@@ -23,7 +23,7 @@ def test_video_moves_without_pointer_and_settles_back_to_text():
     assert capture.moving
     capture.observe(changed, 48, 48, 2.3)
     assert capture.moving
-    capture.observe(changed, 48, 48, 2.6)
+    capture.observe(changed, 48, 48, 3.1)
     assert not capture.moving
 
 
@@ -115,3 +115,23 @@ def test_cached_image_rebuilds_after_equal_byte_length_geometry_change(monkeypat
     capture()
     assert calls == [(48, 24), (24, 48)]
     assert not capture.cached
+
+
+def test_short_video_capture_stall_does_not_flip_back_to_text_scaling():
+    capture = make_capture()
+    black, white = bytes(48 * 48 * 3), b"\xff" * (48 * 48 * 3)
+    capture.observe(black, 48, 48, 1.0)
+    capture.observe(white, 48, 48, 2.0)
+    capture.observe(white, 48, 48, 2.8)
+    assert capture.moving
+    capture.observe(white, 48, 48, 3.1)
+    assert not capture.moving
+
+
+def test_smooth_low_contrast_video_is_detected_without_pointer_motion():
+    capture = make_capture()
+    capture.observe(bytes([80]) * (48 * 48 * 3), 48, 48, 1.0)
+    capture.observe(bytes([96]) * (48 * 48 * 3), 48, 48, 1.1)
+    assert capture.moving
+    capture.observe(bytes([96]) * (48 * 48 * 3), 48, 48, 2.2)
+    assert not capture.moving

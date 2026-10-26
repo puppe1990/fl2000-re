@@ -92,13 +92,13 @@ def test_source_hash_tracks_native_activity_bridge(tmp_path):
     assert sessions.source_fingerprint(tmp_path) != first
 
 
-def test_session_distinguishes_native_sync_from_queued_transport(monkeypatch, capsys):
+def test_session_distinguishes_synchronous_from_queued_transport(monkeypatch, capsys):
     monkeypatch.setattr(sessions, "git_revision", lambda root: "commit")
     monkeypatch.setattr(sessions, "source_fingerprint", lambda root: "hash")
-    fl = types.SimpleNamespace(dev=object(), native_frame_sender=object(), bulk_burst_packets=1)
+    fl = types.SimpleNamespace(dev=object(), bulk_burst_packets=1)
     sessions.start_stream_session(fl, MODE_1024x768, None, 20)
     event = json.loads(capsys.readouterr().out)
-    assert event["usb_transport"] == "native_sync"
+    assert event["usb_transport"] == "pyusb_sync"
     assert event["usb_queue_depth"] == 0
     assert event["usb_burst_packets"] == 1
     fl.frame_transport = types.SimpleNamespace(depth=4)

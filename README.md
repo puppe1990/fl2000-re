@@ -209,12 +209,6 @@ software decoder yet still violate the hardware protocol. The regression suite i
 this final-token constraint for both codecs, including one/two-pixel tails and long runs. A uniform
 XGA frame therefore uses 12 bytes (literal, count, final literal and padding), rather than 8.
 
-The explicit local `usb-native-sync` profile (`0` by default, `1` to opt in) uses one C call for
-consecutive synchronous pixel and EOF transfers through the already loaded libusb handle. It checks
-complete pixels before emitting EOF and never retries a failed/partial transfer. For this experiment
-set queue depth to zero; queued transport otherwise takes precedence. This removes interpreter
-scheduling/copying between phases but does not guarantee a responsive device.
-
 Session records identify actual transport, queue depth and selected burst size. Fault bundles retain
 the latest compression size/backend. A saturated 16-bit scanout counter reports unknown scanout
 rate/running state rather than a false zero-frame-rate outage; bridge stability remains
@@ -224,3 +218,9 @@ The listener also writes `hdmi_instability_bundle` when the bridge changes from 
 retaining recent transport/compression context. Startup and repeated unstable heartbeats do not
 create duplicate alarms. These bridge events do not launch kernel queries and cannot directly prove
 what was visible on VGA.
+
+Motion detection retains the fast scaler through short capture stalls (one second) and detects broad
+low-contrast changes, reducing repeated switches to the slower text scaler during video.
+Cursor-sized changes and low-amplitude noise still do not trigger motion. A still image returns to
+the original sharp text filter once the hold expires; output resolution and exact RGB565 wire
+encoding stay unchanged.

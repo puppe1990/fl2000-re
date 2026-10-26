@@ -151,4 +151,4 @@ def record_frame_ready(capture: CaptureReadiness, sent: int, elapsed_s: float) -
 def _transport_name(fl: FL2000) -> str:
     if getattr(getattr(fl, "frame_transport", None), "depth", 0):
         return "pipeline"
-    return "native_sync" if getattr(fl, "native_frame_sender", None) else "pyusb_sync"
+    return "pyusb_sync"

@@ -10,8 +10,10 @@ from fl2000_re.capture import Grabber
 from fl2000_re.letterbox import fit_rgb888
 from fl2000_re.motion_scaler import MotionScaler
 
-MOTION_HOLD_S = 0.5
-MOTION_PIXEL_DELTA = 24
+# Slow capture can take longer than 0.5 s under video load. Keep the fast
+# scaler across a short stall instead of oscillating back to expensive text fit.
+MOTION_HOLD_S = 1.0
+MOTION_PIXEL_DELTA = 12
 MOTION_FRACTION = 0.08
 SAMPLE_GRID = 48
 

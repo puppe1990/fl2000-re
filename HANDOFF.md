@@ -12,7 +12,7 @@
   USB só tenta o lock sem esperar e reenvia o último payload pronto. O encoder C reutiliza memória;
   sem compilador há fallback NumPy. Nenhuma perda dos bits RGB565 originais.
 - Perfis locais ativos nesta máquina em `~/Library/Application Support/fl2000-re/`:
-  `video-mode=1024x768`, `usb-wire-codec=rle24`, `usb-burst-profile=burst16`, `usb-queue-depth=4`.
+  `video-mode=1024x768`, `usb-wire-codec=rle24`, `usb-burst-profile=single`, `usb-queue-depth=4`.
   Defaults portáveis continuam raw/single/0. Não ativar a experiência antiga `usb-native-sync`:
   permanece desativada e não faz parte desta correção.
 - Fila mantém quatro pares pixels/EOF imutáveis, sem retry. Faz cancel/drain antes de liberar
