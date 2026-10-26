@@ -80,6 +80,7 @@ class FaultContext:
 
     def __init__(self) -> None:
         self.session: dict[str, object] = {}
+        self.wire: dict[str, object] = {}
         self.links: deque[dict[str, object]] = deque(maxlen=20)
         self.stats: deque[str] = deque(maxlen=8)
 
@@ -106,18 +107,28 @@ class FaultContext:
             return None
         if kind == "stream_session_start":
             self.session = event
+            self.wire = {}
             self.links.clear()
             self.stats.clear()
+        if kind == "usb_wire_compression":
+            self.wire = event
         if kind == "hdmi_link_state":
+            previous = self.links[-1].get("video_stable") if self.links else None
             self.links.append(event)
+            if previous is True and event.get("video_stable") is False:
+                return self._bundle(line, event, "hdmi_instability_bundle")
         if kind not in FAULT_EVENTS:
             return None
+        return self._bundle(line, event, "usb_fault_bundle")
+
+    def _bundle(self, line: str, event: dict[str, object], kind: str) -> dict[str, object]:
         return {
-            "event": "usb_fault_bundle",
+            "event": kind,
             "bundle_id": uuid.uuid4().hex[:12],
             "fault_at": line[1:20],
             "fault": event,
             "session": self.session,
+            "wire_compression": self.wire,
             "link_states": list(self.links),
             "recent_stats": list(self.stats),
         }
@@ -177,6 +188,8 @@ def _capture_fault(
     bundle: dict[str, object], output: Path, sleep: Callable[[float], None], collect: Callable
 ) -> None:
     _append_record(output, bundle)
+    if bundle["event"] != "usb_fault_bundle":
+        return
     sleep(2)
     record = {"event": "usb_fault_kernel", "bundle_id": bundle["bundle_id"]}
     try:

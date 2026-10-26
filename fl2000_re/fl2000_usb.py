@@ -43,6 +43,7 @@ class FL2000:
         configure: bool = True,
     ) -> None:
         self.wire_encoder: Rle24Encoder | None = None
+        self.bulk_burst_packets: int | None = None
         self.dev = (
             dev
             if dev is not None

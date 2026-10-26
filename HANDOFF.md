@@ -12,9 +12,19 @@
   USB só tenta o lock sem esperar e reenvia o último payload pronto. O encoder C reutiliza memória;
   sem compilador há fallback NumPy. Nenhuma perda dos bits RGB565 originais.
 - Perfis locais ativos nesta máquina em `~/Library/Application Support/fl2000-re/`:
-  `video-mode=1024x768`, `usb-wire-codec=rle24`, `usb-burst-profile=burst16`, `usb-queue-depth=4`.
+  `video-mode=1024x768`, `usb-wire-codec=rle24`, `usb-burst-profile=single`, `usb-queue-depth=4`.
   Defaults portáveis continuam raw/single/0. Não ativar a experiência antiga `usb-native-sync`:
   permanece desativada e não faz parte desta correção.
+- Monitoramento posterior confirmou novos timeouts mesmo após o erratum, tanto com rajada grande
+  quanto pequena. Não considerar as quedas resolvidas. Teste síncrono nativo com RLE piorou: 13
+  transições HDMI em ~90 s e média de 53 envios/s; foi desativado e removido do PR #56.
+- PR #56: listener preserva também transições estável→instável (`hdmi_instability_bundle`), com
+  tamanho comprimido e estatísticas anteriores, sem query ao kernel por mini piscada. Sessões
+  identificam transporte/fila/rajada reais; contador saturado reporta scanout desconhecido. Detecção
+  de vídeo cobre pouco contraste e mantém o scaler rápido através de pausas curtas; texto parado
+  volta ao filtro nítido após um segundo. Validação: 486 testes.
+- Solicitado desligar o USB-A por 10 segundos e reconectar para isolar estado persistente do
+  dispositivo. Sem confirmação física, não inferir que isso já aconteceu nem declarar melhora.
 - Fila mantém quatro pares pixels/EOF imutáveis, sem retry. Faz cancel/drain antes de liberar
   buffers/interfaces; guarda buffers se callbacks não drenarem. Rajada maior exige descriptor
   SuperSpeed de IF1/alt0 com bMaxBurst=15 e mantém IF0/alt0 sem EP1 duplicado.

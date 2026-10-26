@@ -83,6 +83,9 @@ def start_stream_session(
                 "bulk_block_bytes": mode.width * mode.height * mode.bpp,
                 "capture_fps": capture_fps,
                 "display_id": display_id,
+                "usb_transport": _transport_name(fl),
+                "usb_queue_depth": getattr(getattr(fl, "frame_transport", None), "depth", 0),
+                "usb_burst_packets": getattr(fl, "bulk_burst_packets", None),
                 "usb_speed": getattr(fl.dev, "speed", None),
                 "usb_bus": getattr(fl.dev, "bus", None),
                 "usb_address": getattr(fl.dev, "address", None),
@@ -143,3 +146,9 @@ def record_frame_ready(capture: CaptureReadiness, sent: int, elapsed_s: float) -
             ),
             flush=True,
         )
+
+
+def _transport_name(fl: FL2000) -> str:
+    if getattr(getattr(fl, "frame_transport", None), "depth", 0):
+        return "pipeline"
+    return "pyusb_sync"
