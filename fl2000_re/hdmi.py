@@ -126,7 +126,7 @@ def _select_video_bulk_alt(fl: FL2000) -> None:
     # Remove duplicate EP1 so PyUSB selects the single-packet stream.
     fl.dev.set_interface_altsetting(0, 0)
     fl.dev.set_interface_altsetting(1, 1)
-    print("  USB bulk: interface 1 alt 1, rajada maxima de 1 pacote (teste).")
+    print("  USB bulk: interface 1 alt 1, rajada maxima de 1 pacote.")
 
 
 def _has_single_packet_bulk_alt(device: usb.core.Device) -> bool:
