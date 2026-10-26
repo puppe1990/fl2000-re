@@ -4,11 +4,15 @@ from __future__ import annotations
 
 import contextlib
 import multiprocessing as mp
+from typing import TYPE_CHECKING
 
 from fl2000_re.capture_worker import _capture_child
 from fl2000_re.frame_buffer import new_shared_frame
 from fl2000_re.stream_metrics import SharedCaptureMetrics
 from fl2000_re.video_modes import VideoMode
+
+if TYPE_CHECKING:
+    from fl2000_re.usb_pipeline import FrameTransport
 
 MAX_CAPTURE_RESTARTS = 5
 
@@ -39,6 +43,7 @@ class CaptureProcess:
         self._cursor = cursor
         self._restarts_left = restarts_left
         self._capture_fps = mode.freq if capture_fps is None else capture_fps
+        self.transport: FrameTransport | None = None
         self.sent_frames = 0
         self.run_id: str | None = None
         self.first_capture_logged = False

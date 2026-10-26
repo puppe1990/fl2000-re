@@ -111,7 +111,9 @@ def end_stream_session(run_id: str, exit_code: int, sent: int, elapsed_s: float)
     )
 
 
-def record_frame_ready(capture: CaptureReadiness, sent: int, elapsed_s: float) -> None:
+def record_frame_ready(
+    capture: CaptureReadiness, sent: int, elapsed_s: float, fresh: bool | None = None
+) -> None:
     """Report first transport and first live capture delivery for one session.
 
     Example: record_frame_ready(capture, 1, 0.02)
@@ -130,7 +132,8 @@ def record_frame_ready(capture: CaptureReadiness, sent: int, elapsed_s: float) -
             ),
             flush=True,
         )
-    if not getattr(capture, "first_capture_logged", False) and capture.snapshot_fresh:
+    is_fresh = capture.snapshot_fresh if fresh is None else fresh
+    if not getattr(capture, "first_capture_logged", False) and is_fresh:
         capture.first_capture_logged = True
         print(
             json.dumps(

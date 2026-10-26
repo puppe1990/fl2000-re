@@ -66,9 +66,11 @@ class PumpMetrics:
         self.period = 1.0 / target_fps
         self.last_start: float | None = None
         self.fresh = self.repeated = self.late = 0
-        self.max_gap_ms = self.max_usb_ms = self.max_age_ms = 0.0
+        self.max_gap_ms = self.max_usb_ms = self.max_age_ms = self.max_queue_ms = 0.0
 
-    def record(self, start: float, end: float, fresh: bool, frame_at: float) -> None:
+    def record(
+        self, start: float, end: float, fresh: bool, frame_at: float, queue_ms: float = 0.0
+    ) -> None:
         gap = 0.0 if self.last_start is None else start - self.last_start
         self.last_start = start
         self.fresh += int(fresh)
@@ -76,6 +78,7 @@ class PumpMetrics:
         self.late += int(gap > self.period * 1.5)
         self.max_gap_ms = max(self.max_gap_ms, gap * 1000)
         self.max_usb_ms = max(self.max_usb_ms, (end - start) * 1000)
+        self.max_queue_ms = max(self.max_queue_ms, queue_ms)
         if frame_at > 0:
             self.max_age_ms = max(self.max_age_ms, (end - frame_at) * 1000)
 
@@ -86,11 +89,11 @@ class PumpMetrics:
             f"etapas captura/escala/pack {timings.capture_ms:.1f}/{timings.scale_ms:.1f}/{timings.pack_ms:.1f}ms "
             f"novas {self.fresh / dt:.1f} fps repetidas {self.repeated / dt:.1f} fps "
             f"pausa-max {self.max_gap_ms:.0f}ms USB-max {self.max_usb_ms:.0f}ms "
-            f"idade-max {self.max_age_ms:.0f}ms atrasos {self.late} "
+            f"idade-max {self.max_age_ms:.0f}ms fila-max {self.max_queue_ms:.0f}ms atrasos {self.late} "
             f"cache {'sim' if timings.cached else 'nao'} recuo {timings.backoff_ms:.0f}ms"
         )
         self.fresh = self.repeated = self.late = 0
-        self.max_gap_ms = self.max_usb_ms = self.max_age_ms = 0.0
+        self.max_gap_ms = self.max_usb_ms = self.max_age_ms = self.max_queue_ms = 0.0
         return text
 
 

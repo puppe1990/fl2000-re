@@ -75,6 +75,15 @@ Each session logs a run ID, commit, runtime source/helper hash, HDMI timing, fra
 USB speed/bus/address. Session-end records share the same ID. The source hash also changes for
 uncommitted runtime edits, so source changes can be distinguished from plain service restarts.
 
+An opt-in USB pipeline is selected by `~/Library/Application Support/fl2000-re/usb-queue-depth`: `0`
+(or no file) keeps synchronous validated writes; `2` or `4` queues that many complete pixel/EOF
+pairs using libusb1. Four matches the number of render contexts in Fresco's driver. The oldest
+completed pair is retired while newer pairs remain in flight; each owns its immutable pixels until
+both callbacks finish. A failed submission/completion stops the transport without retry. Pending
+transfers are cancelled and drained before buffers are freed. The pipeline adds latency; `fila-max`
+and capture age use the delivered frame, not the newest submitted frame. This path is experimental
+until validated on the physical adapter; no resolution change is needed.
+
 Every USB write is checked for its exact byte count. PyUSB/libusb1 can return a partial byte count
 on timeout without raising an exception; such a frame is rejected and never terminated as though it
 were complete. EOF failures are also propagated instead of being hidden. Transfers taking 100 ms or
