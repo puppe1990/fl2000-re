@@ -123,3 +123,10 @@ make check
 ```
 
 That is ruff + pytest + Prettier. CI runs the same on every push/PR.
+
+To isolate observer interference during physical diagnostics, set `FL2000_LINK_WATCH=0` in the
+feeder environment. This disables the separate EP0/I2C polling process and logs
+`hdmi_link_watch_disabled`; bulk validation, capture and session logs remain active. The default is
+enabled. Reading bridge status still writes the chip I2C command register, so an isolated process
+does not guarantee zero effect on the device. This switch is a diagnostic control, not a confirmed
+repair for USB timeouts.

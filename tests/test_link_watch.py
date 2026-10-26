@@ -161,3 +161,18 @@ def test_unavailable_observer_process_does_not_stop_stream(monkeypatch, capsys):
 
     assert watch.start_link_watch(Device(), "run", 50, factory) is None
     assert json.loads(capsys.readouterr().out)["event"] == "hdmi_link_watch_error"
+
+
+def test_disabled_observer_never_starts_control_traffic(monkeypatch, capsys):
+    class Device:
+        bus, address = 1, 2
+
+    monkeypatch.setattr(watch.usb.core, "Device", Device)
+    monkeypatch.setenv("FL2000_LINK_WATCH", "0")
+
+    def forbidden_factory(**kwargs):
+        raise AssertionError("Disabled observer must not create a process")
+
+    assert watch.start_link_watch(Device(), "run", 60, forbidden_factory) is None
+    event = json.loads(capsys.readouterr().out)
+    assert event == {"event": "hdmi_link_watch_disabled", "run_id": "run"}
