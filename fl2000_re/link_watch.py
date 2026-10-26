@@ -151,6 +151,9 @@ def start_link_watch(
     """
     if not isinstance(device, usb.core.Device):
         return None
+    if os.environ.get("FL2000_LINK_WATCH", "1") == "0":
+        print(json.dumps({"event": "hdmi_link_watch_disabled", "run_id": run_id}), flush=True)
+        return None
     stop = mp.Event()
     process = process_factory(
         target=_watch_link, args=(run_id, device.bus, device.address, stop, target_fps), daemon=True
