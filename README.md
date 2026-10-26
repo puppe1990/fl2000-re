@@ -56,11 +56,20 @@ guarantee of 60 distinct video frames per second.
 clones **that** display to HDMI. `CGVirtualDisplay` is a private API and can break on a macOS
 update. Run `extend` from Terminal.app with Screen Recording permission.
 
-The LaunchAgent is currently testing `1024x768@50`: the same HDMI raster and 1280x960 virtual
-desktop at a 54 MHz pixel clock (49.849 Hz actual). This reduces raw traffic from about 94 MB/s to
-79 MB/s. It is a custom timing, not a standard VESA DMT mode; monitor compatibility and long-term
-stability remain under validation. The original `--mode 1024x768` remains 60 Hz/65 MHz. A 256 KiB
-chunking experiment still timed out and was removed from the active transport.
+The LaunchAgent skips the blocking `screencapture` preview at startup; the isolated capture child
+fills the seeded black frame. Manual `extend` keeps the preview by default. This removes the two
+possible 5-second preview waits from automatic recovery, but does not repair a stalled USB link.
+
+A local profile file at `~/Library/Application Support/fl2000-re/video-mode` selects any named HDMI
+mode without code edits; for example, `640x480` is the conservative 25.2 MHz/36.9 MB/s stability
+profile. The virtual desktop stays 1280x960, so fallback trades image detail for lower link demand.
+Without a local profile, the LaunchAgent uses `1024x768@50`.
+
+The prior XGA experiment used `1024x768@50`: the same HDMI raster and 1280x960 virtual desktop at a
+54 MHz pixel clock (49.849 Hz actual). This reduces raw traffic from about 94 MB/s to 79 MB/s. It is
+a custom timing, not a standard VESA DMT mode; monitor compatibility and long-term stability remain
+under validation. The original `--mode 1024x768` remains 60 Hz/65 MHz. A 256 KiB chunking experiment
+still timed out and was removed from the active transport.
 
 Each session logs a run ID, commit, runtime source/helper hash, HDMI timing, frame/block sizes and
 USB speed/bus/address. Session-end records share the same ID. The source hash also changes for

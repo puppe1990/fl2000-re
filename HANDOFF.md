@@ -49,6 +49,15 @@ estabilidade do vídeo de entrada segundo o driver Linux ite-it66121. Isso é um
 estabilidade observável mesmo sem timeout USB, mas não comprova a duração do apagão físico depois do
 adaptador VGA. O observador mantém heartbeat a cada 10 s e registra mudanças na amostragem de 1 s.
 
+### Preferência de leitura confirmada em 26/10
+
+O teste temporário 640x480 reduziu a qualidade do texto. O usuário reclamou e o perfil local foi
+restaurado para `1024x768` (60 Hz/65 MHz) às 09:21, mantendo desktop 1280x960. Arquivo local:
+`~/Library/Application Support/fl2000-re/video-mode`. Não voltar a reduzir resolução como solução
+automática. A estabilidade do transporte continua pendente. O agent agora pula o preview
+screencapture síncrono; a captura isolada fornece o primeiro quadro. O teste conservador não é a
+configuração entregue para leitura.
+
 ## Objetivo da missão
 
 Deixar a imagem no monitor ligado ao **Hagibis FL2000DX** (`1d5c:2000`) **nítida/legível**. O

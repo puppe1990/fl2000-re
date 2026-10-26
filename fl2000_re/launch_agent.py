@@ -16,7 +16,7 @@ from typing import Any
 import usb.core
 
 from fl2000_re.registers import FL2000_USB_PID, FL2000_USB_VID
-from fl2000_re.video_modes import MODE_1024x768_50
+from fl2000_re.video_modes import MODE_1024x768_50, VideoMode, resolve_mode
 
 LABEL = "com.fl2000-re.extend"
 POLL_S = 2.0
@@ -180,6 +180,19 @@ def rotate_extend_log(path: Path, max_bytes: int = LOG_MAX_BYTES) -> None:
         pass
 
 
+def agent_video_mode(profile_path: Path | None = None) -> VideoMode:
+    """Read a persistent local profile without changing the source on every test.
+
+    Example: agent_video_mode(Path("video-mode")) resolves the stored mode name.
+    """
+    path = (
+        profile_path or Path.home() / "Library" / "Application Support" / "fl2000-re" / "video-mode"
+    )
+    if not path.exists():
+        return MODE_1024x768_50
+    return resolve_mode(path.read_text().strip())
+
+
 def cmd_extend_agent() -> int:
     """Wait for the dongle, drop the fake CD, then extend (LaunchAgent entry).
 
@@ -196,19 +209,20 @@ def cmd_extend_agent() -> int:
     from fl2000_re.fl2000_usb import FL2000
     from fl2000_re.stream import EXTEND_CAPTURE_FPS, cmd_extend
 
-    # The 65 MHz profile produced confirmed partial USB timeouts on 2026-10-25.
-    # Try the same raster at 54 MHz (~50 Hz), reducing link and feeder demand.
+    # Both XGA clocks produced timeouts; local profile permits a controlled fallback.
+    # Skip the synchronous CG preview so recovery never waits on its 5s timeout.
     return cmd_extend(
         FL2000(),
         0,
         1.0,
         1.0,
-        MODE_1024x768_50,
+        agent_video_mode(),
         0,
         "left",
         True,
         capture_fps=EXTEND_CAPTURE_FPS,
         virtual_size=VIRTUAL_DESKTOP,
+        startup_preview=False,
     )
 
 

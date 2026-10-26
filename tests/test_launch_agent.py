@@ -137,6 +137,7 @@ def test_cmd_extend_agent_shows_the_pointer(monkeypatch):
     from fl2000_re import fl2000_usb
     from fl2000_re.video_modes import MODE_1024x768_50
 
+    monkeypatch.setattr(launch_agent, "agent_video_mode", lambda: MODE_1024x768_50)
     monkeypatch.setattr(launch_agent, "wait_for_dongle", lambda *_a, **_k: True)
     monkeypatch.setattr(launch_agent, "unmount_fake_cd", lambda *_a, **_k: None)
     monkeypatch.setattr(launch_agent, "rotate_extend_log", lambda *_a, **_k: None)
@@ -149,11 +150,13 @@ def test_cmd_extend_agent_shows_the_pointer(monkeypatch):
         seen["cursor"] = cursor
         seen["capture_fps"] = kwargs.get("capture_fps")
         seen["virtual_size"] = kwargs.get("virtual_size")
+        seen["startup_preview"] = kwargs.get("startup_preview")
         return 0
 
     monkeypatch.setattr(stream, "cmd_extend", fake_extend)
     assert cmd_extend_agent() == 0
     assert seen["cursor"] is True
+    assert seen["startup_preview"] is False
     assert seen["mode"] is MODE_1024x768_50
     assert seen["virtual_size"] == launch_agent.VIRTUAL_DESKTOP
     assert launch_agent.VIRTUAL_DESKTOP == (1280, 960)
@@ -195,3 +198,23 @@ def test_rotation_keeps_launchd_open_stdout_writing_to_live_log(tmp_path: Path):
     assert path.stat().st_ino == original_inode
     assert path.read_text() == "after\n"
     assert path.with_name("extend.log.old").read_text() == "before\n"
+
+
+def test_local_profile_is_optional_and_resolves_existing_modes(tmp_path):
+    from fl2000_re.launch_agent import agent_video_mode
+    from fl2000_re.video_modes import MODE_640x480, MODE_1024x768_50
+
+    profile = tmp_path / "video-mode"
+    assert agent_video_mode(profile) is MODE_1024x768_50
+    profile.write_text("640x480\n")
+    assert agent_video_mode(profile) is MODE_640x480
+
+
+def test_invalid_local_profile_reports_received_value(tmp_path):
+    import pytest
+    from fl2000_re.launch_agent import agent_video_mode
+
+    profile = tmp_path / "video-mode"
+    profile.write_text("invalid-mode")
+    with pytest.raises(ValueError, match="invalid-mode"):
+        agent_video_mode(profile)
