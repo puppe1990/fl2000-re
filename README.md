@@ -189,3 +189,8 @@ arrays. It produces byte-identical output to the Python reference, including lan
 boundaries and padding. The library is compiled once into the user cache before pumping; systems
 without a C compiler retain the reference implementation. Native calls run in the capture child for
 clone/extend and never perform USB access. Logs identify the encoder backend.
+
+`usb-burst-profile` in the same local profile directory defaults to `single`. An explicit `burst16`
+selects IF1/alt0 only when its full SuperSpeed companion advertises bulk EP1 with `bMaxBurst=15`.
+Control IF0 stays at alt0 to avoid a duplicate EP1. This is an opt-in throughput experiment for
+larger video payloads; return the file to `single` and restart to restore single-packet bursts.
