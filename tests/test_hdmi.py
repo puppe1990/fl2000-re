@@ -1,6 +1,7 @@
 """Register programming is verified with a fake USB device; no dongle needed."""
 
 import fl2000_re.hdmi as hdmi
+import pytest
 from fl2000_re.fl2000_usb import FL2000
 from fl2000_re.registers import (
     REG_ACLK,
@@ -9,6 +10,11 @@ from fl2000_re.registers import (
     REQ_READ,
 )
 from fl2000_re.video_modes import MODE_640x480, shift_vsync2
+
+
+@pytest.fixture(autouse=True)
+def isolated_local_burst_profile(monkeypatch):
+    monkeypatch.setattr(hdmi, "stream_bulk_alternate", lambda device: 1)
 
 
 class FakeUSBDevice:
@@ -179,3 +185,16 @@ def test_rle24_selects_rgb888_compression_after_format_watermark_reset(monkeypat
     assert pixel_control & (1 << 7)
     assert fl.dev.regs[REG_ACLK] & (1 << 28)
     assert fl.dev.regs[REG_PLL] == MODE_640x480.pll
+
+
+def test_burst16_keeps_duplicate_endpoint_disabled_and_uses_streaming_alt0(monkeypatch):
+    monkeypatch.setattr(hdmi.sys, "platform", "darwin")
+    monkeypatch.setattr(hdmi, "_has_single_packet_bulk_alt", lambda dev: True)
+    monkeypatch.setattr(hdmi, "stream_bulk_alternate", lambda dev: 0)
+    calls = []
+    device = type(
+        "Device", (), {"set_interface_altsetting": lambda self, i, a: calls.append((i, a))}
+    )()
+    monkeypatch.setattr(hdmi.usb.util, "claim_interface", lambda dev, i: calls.append(("claim", i)))
+    hdmi._select_video_bulk_alt(FL2000(dev=device, configure=False))
+    assert calls == [("claim", 1), (0, 0), (1, 0)]

@@ -447,7 +447,7 @@ def test_capture_process_starts_the_child_paced_to_the_mode_refresh(monkeypatch)
     monkeypatch.setattr(mp, "Process", RecordingProcess)
     capture = stream.CaptureProcess(bytes(512), MODE_640x480, None, 1.0, 1.0, False)
     capture.start()
-    assert seen["args"][-4] == MODE_640x480.freq
+    assert seen["args"][12] == MODE_640x480.freq
     capture.stop_and_join()
 
 
@@ -465,7 +465,7 @@ def test_capture_process_can_pace_below_the_usb_refresh(monkeypatch):
         bytes(512), MODE_640x480, None, 1.0, 1.0, False, capture_fps=stream.EXTEND_CAPTURE_FPS
     )
     capture.start()
-    assert seen["args"][-4] == stream.EXTEND_CAPTURE_FPS
+    assert seen["args"][12] == stream.EXTEND_CAPTURE_FPS
     assert stream.EXTEND_CAPTURE_FPS == 20
     capture.stop_and_join()
 
@@ -1331,7 +1331,7 @@ def test_rle_pump_keeps_raster_cadence_and_eof_even_for_tiny_frames(monkeypatch,
     raster_hz = pll_pixel_clock(MODE_1024x768.pll) / (1344 * 806)
     assert raster_hz * 10 <= sent < raster_hz * 10 + 1
     assert len(fl.dev.packets) == sent * 2
-    assert all(len(packet) == 8 for packet in fl.dev.packets[::2])
+    assert all(len(packet) == 12 for packet in fl.dev.packets[::2])
     assert all(packet == b"" for packet in fl.dev.packets[1::2])
     if changing:
         assert fl.dev.packets[0] != fl.dev.packets[2]

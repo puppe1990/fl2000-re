@@ -176,3 +176,35 @@ explicit zero-length transfer. Encoding may increase traffic for high-entropy im
 stability is experimental. Compressed frames use the actual PLL raster period to avoid accumulating
 a queue of tiny repeated frames. Return the profile to `raw` and restart the agent to restore the
 original transport.
+
+For clone/extend, RLE encoding runs inside the existing isolated capture child. The USB feeder
+receives tagged, complete compressed payloads through a bounded shared buffer sized for the
+worst-case RGB888/RLE expansion. Length, content and generation publish under the same lock; the
+feeder only tries that lock without waiting and keeps its previous complete payload if the writer is
+busy. Encoding, scaling or capture stalls therefore do not block repeated USB frames or their
+mandatory EOF. The initial frame is encoded once before the timed pump starts.
+
+An optional portable C codec reuses one output allocation and replaces the vectorized RLE temporary
+arrays. It produces byte-identical output to the Python reference, including lane order, run
+boundaries and padding. The library is compiled once into the user cache before pumping; systems
+without a C compiler retain the reference implementation. Native calls run in the capture child for
+clone/extend and never perform USB access. Logs identify the encoder backend.
+
+`usb-burst-profile` in the same local profile directory defaults to `single`. An explicit `burst16`
+selects IF1/alt0 only when its full SuperSpeed companion advertises bulk EP1 with `bMaxBurst=15`.
+Control IF0 stays at alt0 to avoid a duplicate EP1. This is an opt-in throughput experiment for
+larger video payloads; return the file to `single` and restart to restore single-packet bursts.
+
+The local `usb-queue-depth` profile accepts `0` (default synchronous), `2` or `4`. The
+compressed-video experiment uses two immutable prepared pixel/EOF pairs, submitted before waiting
+for completion, so the next transfer is already owned by libusb while Python schedules. Each
+completed phase validates status and exact byte count; errors are never retried. Close
+cancels/drains callbacks before freeing buffers or releasing interfaces. An undrainable queue
+retains its native buffers until process exit. Queue age is included in delivered-frame metrics.
+
+Both RLE codecs reserve the last raster pixel as a literal token. Fresco's
+[documented chip erratum](https://github.com/FrescoLogic/FL2000/blob/master/src/fl2000_compression.c)
+requires this even when the final pixels form a run. A repeat-count token may roundtrip through a
+software decoder yet still violate the hardware protocol. The regression suite independently checks
+this final-token constraint for both codecs, including one/two-pixel tails and long runs. A uniform
+XGA frame therefore uses 12 bytes (literal, count, final literal and padding), rather than 8.

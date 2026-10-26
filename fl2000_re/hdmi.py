@@ -9,6 +9,7 @@ import time
 import usb.core
 import usb.util
 
+from fl2000_re.bulk_profile import has_bulk_alternate, stream_bulk_alternate
 from fl2000_re.fl2000_usb import FL2000
 from fl2000_re.it66121 import (
     IT66121,
@@ -128,26 +129,15 @@ def _select_video_bulk_alt(fl: FL2000) -> None:
     if sys.platform != "darwin" or not _has_single_packet_bulk_alt(fl.dev):
         fl.dev.set_interface_altsetting(0, 1)
         return
+    alternate = stream_bulk_alternate(fl.dev)
     usb.util.claim_interface(fl.dev, 1)
-    # Remove duplicate EP1 so PyUSB selects the single-packet stream.
+    # Remove duplicate EP1 so PyUSB selects only the chosen streaming route.
     fl.dev.set_interface_altsetting(0, 0)
-    fl.dev.set_interface_altsetting(1, 1)
-    print("  USB bulk: interface 1 alt 1, rajada maxima de 1 pacote.")
+    fl.dev.set_interface_altsetting(1, alternate)
+    print(
+        f"  USB bulk: interface 1 alt {alternate}, rajada maxima de {1 if alternate else 16} pacote(s)."
+    )
 
 
 def _has_single_packet_bulk_alt(device: usb.core.Device) -> bool:
-    if getattr(device, "speed", 0) < 4:
-        return False
-    interfaces = (
-        i
-        for i in device.get_active_configuration()
-        if (i.bInterfaceNumber, i.bAlternateSetting) == (1, 1)
-    )
-    endpoints = (ep for interface in interfaces for ep in interface)
-    return any(
-        ep.bEndpointAddress == BULK_EP
-        and ep.bmAttributes & 3 == 2
-        and len(ep.extra_descriptors) >= 6
-        and bytes(ep.extra_descriptors)[:3] == b"\x06\x30\x00"
-        for ep in endpoints
-    )
+    return has_bulk_alternate(device, 1, 0)

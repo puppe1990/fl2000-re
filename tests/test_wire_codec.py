@@ -47,19 +47,20 @@ def test_exact_runs_and_dword_padding_roundtrip(count):
     assert decode_rgb565(wire, count) == raw
 
 
-def test_static_xga_frame_compresses_to_one_pixel_and_count():
+def test_static_xga_frame_ends_with_required_literal_after_count():
     encoder = codec.Rle24Encoder(1024 * 768)
     wire = encoder.encode(bytes(1024 * 768 * 2))
     logical = dword_swap_frame(wire)
-    assert len(wire) == 8
+    assert len(wire) == 12
     assert logical[:3] == b"\x00\x00\x80"
-    assert int.from_bytes(logical[3:6], "little") == 1024 * 768 - 1
+    assert int.from_bytes(logical[3:6], "little") == 1024 * 768 - 2
+    assert logical[6:9] == b"\x00\x00\x80"
     assert decode_rgb565(wire, 1024 * 768) == bytes(1024 * 768 * 2)
 
 
 def test_repeat_count_is_not_truncated_to_16_bits():
     wire, raw = encode_values(np.full(65537, 0x1234, dtype=np.uint16))
-    assert int.from_bytes(dword_swap_frame(wire)[3:6], "little") == 65536
+    assert int.from_bytes(dword_swap_frame(wire)[3:6], "little") == 65535
     assert decode_rgb565(wire, 65537) == raw
 
 
@@ -93,7 +94,7 @@ def test_bulk_validation_uses_encoded_bytes_and_still_sends_explicit_eof():
     fl = FL2000(dev=device, configure=False)
     fl.wire_encoder = codec.Rle24Encoder(1024 * 768)
     bulk_transfer.send_frame(fl, bytes(1024 * 768 * 2))
-    assert len(packets[0]) == 8
+    assert len(packets[0]) == 12
     assert packets[1] == b""
 
 
@@ -135,7 +136,7 @@ def test_compression_telemetry_is_bounded_and_reports_actual_wire_size(capsys):
         encoder.encode(bytes(1024 * 768 * 2))
     events = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
     assert [event["frame"] for event in events] == [1, 601]
-    assert all(event["wire_bytes"] == 8 for event in events)
+    assert all(event["wire_bytes"] == 12 for event in events)
     assert all(event["source_bytes"] == 1572864 for event in events)
 
 
@@ -158,4 +159,4 @@ def test_compressed_transfer_failure_stops_without_retry_or_spurious_eof(failed_
     with pytest.raises(usb.core.USBError):
         bulk_transfer.send_frame(fl, bytes(1572864))
     assert len(packets) == (1 if failed_phase == "pixels" else 2)
-    assert len(packets[0]) == 8
+    assert len(packets[0]) == 12

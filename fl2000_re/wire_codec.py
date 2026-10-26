@@ -13,6 +13,7 @@ from pathlib import Path
 import numpy as np
 import usb.core
 
+from fl2000_re.native_rle import optional_native_encoder
 from fl2000_re.pixels import dword_swap_frame
 from fl2000_re.video_modes import VideoMode, pll_pixel_clock
 
@@ -31,6 +32,13 @@ def wire_codec_profile(path: Path | None = None) -> str:
     return value
 
 
+class EncodedWireFrame(bytes):
+    """Complete RLE payload prepared by the isolated capture child.
+
+    Example: EncodedWireFrame(payload) bypasses RGB565 re-encoding in USB.
+    """
+
+
 class Rle24Encoder:
     """Cache and encode immutable complete RGB565 frames, never partial damage.
 
@@ -44,13 +52,22 @@ class Rle24Encoder:
         self._source: bytes | None = None
         self._wire: bytes = b""
         self._frames = 0
+        self._native = optional_native_encoder(pixel_count)
 
     def encode(self, frame: bytes) -> bytes:
+        if isinstance(frame, EncodedWireFrame):
+            self._source = None
+            self._wire = frame
+            self._report_wire_size()
+            return frame
         if len(frame) != self.pixel_count * 2:
             raise ValueError(f"RGB565 frame bytes={len(frame)}; expected {self.pixel_count * 2}")
         if frame is not self._source and frame != self._source:
-            pixels = np.frombuffer(dword_swap_frame(frame), dtype="<u2")
-            self._wire = _encode_runs(pixels)
+            if self._native is not None:
+                self._wire = self._native.encode(frame)
+            else:
+                pixels = np.frombuffer(dword_swap_frame(frame), dtype="<u2")
+                self._wire = _encode_runs(pixels)
         self._source = frame
         self._report_wire_size()
         return self._wire
@@ -65,6 +82,7 @@ class Rle24Encoder:
                     "event": "usb_wire_compression",
                     "frame": self._frames,
                     "source_bytes": self.pixel_count * 2,
+                    "encoder_backend": "native" if self._native is not None else "numpy",
                     "wire_bytes": len(self._wire),
                     "wire_to_source_ratio": round(len(self._wire) / (self.pixel_count * 2), 4),
                 }
@@ -91,7 +109,8 @@ def _encode_runs(pixels: np.ndarray) -> bytes:
     counts = np.diff(np.r_[starts, pixels.size])
     repeated = counts > 1
     positions = np.arange(starts.size) + np.r_[0, np.cumsum(repeated[:-1])]
-    tokens = np.empty(starts.size + np.count_nonzero(repeated), dtype=np.uint32)
+    final_literal = counts[-1] > 2
+    tokens = np.empty(starts.size + np.count_nonzero(repeated) + final_literal, dtype=np.uint32)
     literals = _rgb565_literal_words(pixels[starts])
     tokens[positions] = literals
     # A two-pixel run costs the same as two literals. Avoid a trailing count=1,
@@ -99,6 +118,10 @@ def _encode_runs(pixels: np.ndarray) -> bytes:
     tokens[positions[repeated] + 1] = np.where(
         counts[repeated] == 2, literals[repeated], counts[repeated] - 1
     )
+    # Fresco documents a hardware bug: the compressed raster MUST end with a
+    # literal pixel, never a repeat count. Keep the last pixel outside its run.
+    if final_literal:
+        tokens[-2], tokens[-1] = counts[-1] - 2, literals[-1]
     octets = ((tokens[:, None] >> np.array([0, 8, 16])) & 255).astype(np.uint8).tobytes()
     # The vendor pads to dword alignment with 0x80; the decoder stops at the
     # configured raster size. Preserve the ordinary FL2000 64-bit lane order.
