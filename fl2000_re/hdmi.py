@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import contextlib
+import sys
 import time
 
 import usb.core
@@ -106,7 +107,7 @@ def _claim_bulk_alt1(fl: FL2000) -> int:
     try:
         with contextlib.suppress(usb.core.USBError):
             usb.util.claim_interface(fl.dev, 0)
-        if _has_single_packet_bulk_alt(fl.dev):
+        if sys.platform == "darwin" and _has_single_packet_bulk_alt(fl.dev):
             usb.util.claim_interface(fl.dev, 1)
             # Remove duplicate EP1 so PyUSB selects the single-packet stream.
             fl.dev.set_interface_altsetting(0, 0)

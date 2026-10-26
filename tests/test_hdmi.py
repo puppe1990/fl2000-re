@@ -69,6 +69,7 @@ def test_bring_up_hdmi_aborts_without_it66121(monkeypatch):
 
 
 def test_single_packet_burst_uses_streaming_interface_without_duplicate_ep(monkeypatch):
+    monkeypatch.setattr(hdmi.sys, "platform", "darwin")
     calls = []
 
     class Device:
@@ -125,3 +126,19 @@ def test_superspeed_without_single_packet_bulk_alt_is_not_reconfigured():
     assert not hdmi._has_single_packet_bulk_alt(device)
     device.get_active_configuration = lambda: [_SinglePacketBulkAlt(b"\x06\x30\x0f\x00\x00\x00")]
     assert not hdmi._has_single_packet_bulk_alt(device)
+
+
+def test_other_platforms_keep_original_bulk_selection(monkeypatch):
+    import types
+
+    calls = []
+    device = types.SimpleNamespace(
+        speed=4,
+        get_active_configuration=lambda: [_SinglePacketBulkAlt()],
+        set_interface_altsetting=lambda i, alt: calls.append((i, alt)),
+        clear_halt=lambda ep: None,
+    )
+    monkeypatch.setattr(hdmi.sys, "platform", "linux")
+    monkeypatch.setattr(hdmi.usb.util, "claim_interface", lambda dev, i: None)
+    assert hdmi._claim_bulk_alt1(FL2000(dev=device, configure=False)) == 0
+    assert calls == [(0, 1)]

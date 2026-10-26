@@ -153,6 +153,6 @@ still use bulk OUT endpoint 1 and explicit EOF, with the same timing and wire fo
 also claims/releases streaming interface 1. This tests host/burst interaction; the descriptor
 difference alone does not establish a cause of the earlier partial timeouts.
 
-Selection is restricted to SuperSpeed devices whose IF1/alt1 bulk EP1 includes the complete
-single-packet SuperSpeed companion descriptor. USB 2 and unsupported/missing descriptors keep the
-original control-interface route.
+Selection is restricted to macOS SuperSpeed devices whose IF1/alt1 bulk EP1 includes the complete
+single-packet SuperSpeed companion descriptor. Other platforms, USB 2 and unsupported/missing
+descriptors keep the original control-interface route.
