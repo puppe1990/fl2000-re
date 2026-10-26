@@ -156,3 +156,17 @@ difference alone does not establish a cause of the earlier partial timeouts.
 Selection is restricted to macOS SuperSpeed devices whose IF1/alt1 bulk EP1 includes the complete
 single-packet SuperSpeed companion descriptor. Other platforms, USB 2 and unsupported/missing
 descriptors keep the original control-interface route.
+
+An opt-in libusb frame queue is selected by the local file
+`~/Library/Application Support/fl2000-re/usb-queue-depth`: no file or `0` retains synchronous
+writes, while `2`/`4` keeps complete pixel/EOF pairs in flight. The oldest delivered pair is retired
+while newer immutable buffers remain owned by the queue. Failed transfers are never repeated;
+cancellation callbacks drain before native memory is freed. `fila-max` and capture age refer to the
+delivered generation, including seed repeats. Buffering adds approximately one to three frames of
+latency while isolating USB submission from Python-loop gaps.
+
+The previous queued experiment on the duplicated/burst-16 endpoint still timed out. This version is
+being validated with the single-packet streaming route after that route sustained more than 20
+minutes without a USB restart; the user still reported short image flickers during synchronous
+feeding. The queue targets continuity and does not by itself prove that the physical image is
+flicker-free.

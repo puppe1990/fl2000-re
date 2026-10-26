@@ -45,6 +45,7 @@ from fl2000_re.capture_pacing import (
     snapped_pointer as snapped_pointer,
 )
 from fl2000_re.capture_process import MAX_CAPTURE_RESTARTS, CaptureProcess
+from fl2000_re.capture_process import capture_worker_exit_message as capture_worker_exit_message
 from fl2000_re.capture_worker import _capture_child as _capture_child
 from fl2000_re.capture_worker import _retune_from_live_pointer as _retune_from_live_pointer
 from fl2000_re.capture_worker import hdmi_capture_worker as hdmi_capture_worker
@@ -61,6 +62,7 @@ from fl2000_re.stream_metrics import PumpMetrics
 from fl2000_re.stream_metrics import _maybe_print_stats as _maybe_print_stats
 from fl2000_re.stream_metrics import format_stream_stats as format_stream_stats
 from fl2000_re.thread_priority import prioritize_usb_thread
+from fl2000_re.usb_pipeline import SyncFrameTransport, make_frame_transport
 from fl2000_re.video_modes import MODE_640x480, VideoMode, default_mirror_mode, needs_usb3
 
 TARGET_FPS = 60
@@ -134,28 +136,6 @@ def cmd_bars(fl: FL2000, seconds: float, mode: VideoMode | None = None) -> int:
         return 1
     print(f"  streaming {len(frame)} bytes/frame por {seconds:.0f}s (olhe o HDMI)")
     return _pump_until(fl, frame, seconds)
-
-
-def capture_worker_exit_message(exitcode: int | None) -> str:
-    """Portuguese diagnostic when the capture child dies (SIGSEGV cannot be excepted).
-
-    Example: capture_worker_exit_message(-11)
-    """
-    if exitcode is None:
-        return "  captura morreu (sem exitcode). HDMI ficou no último frame. Religue o extend."
-    if exitcode < 0:
-        sig = -exitcode
-        detail = ""
-        if sig == 11:
-            detail = (
-                " mss.grab chama CGImageGetWidth via ctypes; ponteiro inválido mata o Python "
-                "(não dá try/except). "
-            )
-        return (
-            f"  captura morreu (sinal {sig}).{detail}"
-            " HDMI ficou no último frame para o monitor não apagar. Religue o extend."
-        )
-    return f"  captura saiu com código {exitcode}. HDMI ficou no último frame. Religue o extend."
 
 
 def _grab_preview_rgb(
@@ -311,6 +291,8 @@ def _pace_clone(
     )
     run_id = start_stream_session(fl, mode, display_id, capture._capture_fps)
     capture.run_id = run_id
+    transport = make_frame_transport(fl, send_frame)
+    capture.transport = transport
     capture.start()
     link_watch = start_link_watch(fl.dev, run_id, mode.freq)
     qos = "ativa" if prioritize_usb_thread() else "indisponivel"
@@ -338,9 +320,11 @@ def _pace_clone(
         print(f"  {exc}", flush=True)
         rc = 1
     finally:
+        stop_link_watch(link_watch)
+        if not transport.close():
+            rc = 1
         if video_activity is not None:
             video_activity.close()
-        stop_link_watch(link_watch)
         sent = capture.sent_frames
         capture.stop_and_join()
         dt = max(0.001, time.monotonic() - t0)
@@ -374,6 +358,7 @@ def _pump_paced_frames(
     last_progress = t0
     wall0, up0 = _read_clocks()
     pump_metrics = PumpMetrics(mode.freq)
+    transport = getattr(capture, "transport", None) or SyncFrameTransport(fl, send_frame)
     while end_at is None or time.monotonic() < end_at:
         wall0, up0 = _raise_if_woke(wall0, up0)
         now = time.monotonic()
@@ -390,16 +375,19 @@ def _pump_paced_frames(
             )
         frame = capture.snapshot()
         usb_start = time.monotonic()
-        send_frame(fl, frame)
+        delivered = transport.send(
+            frame, getattr(capture, "frame_at", 0.0), getattr(capture, "snapshot_fresh", True)
+        )
         sent += 1
         capture.sent_frames = sent
         now = time.monotonic()
-        record_frame_ready(capture, sent, now - t0)
+        record_frame_ready(capture, sent, now - t0, fresh=delivered.fresh)
         pump_metrics.record(
             usb_start,
             now,
-            getattr(capture, "snapshot_fresh", True),
-            getattr(capture, "frame_at", 0.0),
+            delivered.fresh,
+            delivered.frame_at,
+            delivered.queue_ms,
         )
         last_log, last_sent, stat_cap = _maybe_print_stats(
             now,

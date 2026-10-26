@@ -1304,3 +1304,23 @@ def test_video_activity_ends_on_normal_exit_interrupt_and_usb_failure(monkeypatc
     result = stream._pace_clone(FL2000(dev=FakeBulkDevice()), bytes(512), MODE_640x480, None, 1)
     assert result == int(isinstance(failure, stream.usb.core.USBError))
     assert ended == [42]
+
+
+@pytest.mark.parametrize("drained", [False, True])
+def test_transport_drains_before_activity_ends_or_usb_is_released(monkeypatch, drained):
+    from fl2000_re.mac_activity import VideoActivity
+
+    events = []
+    transport = types.SimpleNamespace(close=lambda: events.append("drain") or drained)
+    monkeypatch.setattr(mp, "Process", FakeProcess)
+    monkeypatch.setattr(stream, "make_frame_transport", lambda *args: transport)
+    monkeypatch.setattr(
+        stream,
+        "begin_video_activity",
+        lambda: VideoActivity(1, lambda token: events.append("activity")),
+    )
+    monkeypatch.setattr(stream, "release_bulk", lambda fl: events.append("release"))
+    monkeypatch.setattr(stream, "_pump_paced_frames", lambda *args: 1)
+    result = stream._pace_clone(FL2000(dev=FakeBulkDevice()), bytes(512), MODE_640x480, None, 1)
+    assert result == int(not drained)
+    assert events == ["drain", "activity", "release"]

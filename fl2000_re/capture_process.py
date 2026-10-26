@@ -4,11 +4,15 @@ from __future__ import annotations
 
 import contextlib
 import multiprocessing as mp
+from typing import TYPE_CHECKING
 
 from fl2000_re.capture_worker import _capture_child
 from fl2000_re.frame_buffer import new_shared_frame
 from fl2000_re.stream_metrics import SharedCaptureMetrics
 from fl2000_re.video_modes import VideoMode
+
+if TYPE_CHECKING:
+    from fl2000_re.usb_pipeline import FrameTransport
 
 MAX_CAPTURE_RESTARTS = 5
 
@@ -39,6 +43,7 @@ class CaptureProcess:
         self._cursor = cursor
         self._restarts_left = restarts_left
         self._capture_fps = mode.freq if capture_fps is None else capture_fps
+        self.transport: FrameTransport | None = None
         self.sent_frames = 0
         self.run_id: str | None = None
         self.first_capture_logged = False
@@ -144,3 +149,25 @@ class CaptureProcess:
             return
         with contextlib.suppress(Exception):
             self.proc.join(timeout=timeout)
+
+
+def capture_worker_exit_message(exitcode: int | None) -> str:
+    """Portuguese diagnostic when the capture child dies (SIGSEGV cannot be excepted).
+
+    Example: capture_worker_exit_message(-11)
+    """
+    if exitcode is None:
+        return "  captura morreu (sem exitcode). HDMI ficou no último frame. Religue o extend."
+    if exitcode < 0:
+        sig = -exitcode
+        detail = ""
+        if sig == 11:
+            detail = (
+                " mss.grab chama CGImageGetWidth via ctypes; ponteiro inválido mata o Python "
+                "(não dá try/except). "
+            )
+        return (
+            f"  captura morreu (sinal {sig}).{detail}"
+            " HDMI ficou no último frame para o monitor não apagar. Religue o extend."
+        )
+    return f"  captura saiu com código {exitcode}. HDMI ficou no último frame. Religue o extend."

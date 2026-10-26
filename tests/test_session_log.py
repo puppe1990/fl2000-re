@@ -90,3 +90,17 @@ def test_source_hash_tracks_native_activity_bridge(tmp_path):
     first = sessions.source_fingerprint(tmp_path)
     bridge.write_text("begin changed activity")
     assert sessions.source_fingerprint(tmp_path) != first
+
+
+def test_first_capture_readiness_uses_delivered_generation_override(capsys):
+    capture = types.SimpleNamespace(run_id="run", snapshot_fresh=True, first_capture_logged=False)
+    sessions.record_frame_ready(capture, 1, 0.1, fresh=False)
+    assert not capture.first_capture_logged
+    capture.snapshot_fresh = False
+    sessions.record_frame_ready(capture, 2, 0.2, fresh=True)
+    assert capture.first_capture_logged
+    events = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
+    assert [event["event"] for event in events] == [
+        "stream_first_frame_sent",
+        "stream_first_capture_sent",
+    ]

@@ -109,3 +109,16 @@ tests/test_<module>.py    mirrors the package
   both). A stale CGImage is SIGSEGV, not a Python exception (2026-09-19, `0x39e37920`). Preview via
   `screencapture` (subprocess). Live grab stays in the capture child; if that child dies, keep
   sending the last frame and print `capture_worker_exit_message`.
+
+## Current USB continuity investigation (2026-10-26)
+
+- On macOS SuperSpeed, validated IF1/alt1 bulk EP1 uses bMaxBurst=0. Disable duplicate bulk EP1 on
+  control IF0 with alt0; USB2/other hosts retain the old route. The first run of this route exceeded
+  26 minutes without timeout; this is not proof that every physical flicker is gone. User still saw
+  brief flickers near 1 Hz.
+- Optional `~/Library/Application Support/fl2000-re/usb-queue-depth` accepts 0/2/4. Keep queued
+  pixels immutable and retained until both pixel/EOF callbacks complete or cancellation drains. A
+  failed frame is never retried. Do not free live DMA.
+- Queue metrics/readiness must describe the oldest delivered generation, not the latest submitted
+  snapshot. USB timeout logs cannot reliably show mini HDMI/VGA flickers when bulk transfers keep
+  completing; visual confirmation is separate.

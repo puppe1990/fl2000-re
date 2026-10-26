@@ -39,3 +39,10 @@ def test_preview_has_no_capture_age_until_first_real_frame():
     metrics = PumpMetrics(60)
     metrics.record(100.0, 100.002, False, 0.0)
     assert metrics.max_age_ms == 0.0
+
+
+def test_queue_latency_is_visible_and_reset_each_interval():
+    metrics = PumpMetrics(60)
+    metrics.record(1, 1.01, True, 0.9, queue_ms=65)
+    assert "fila-max 65ms" in metrics.format_interval(1, CaptureTimings())
+    assert metrics.max_queue_ms == 0
