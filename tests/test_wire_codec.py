@@ -125,3 +125,15 @@ def test_compressed_feed_tracks_real_pll_instead_of_raw_headroom():
     expected = (mode.h_sync_1 & 0xFFF) * (mode.v_sync_1 & 0xFFF) / pll_pixel_clock(mode.pll)
     assert codec.rle_frame_period_s(mode) == pytest.approx(expected)
     assert 1 / codec.rle_frame_period_s(mode) == pytest.approx(60.0038402)
+
+
+def test_compression_telemetry_is_bounded_and_reports_actual_wire_size(capsys):
+    import json
+
+    encoder = codec.Rle24Encoder(1024 * 768)
+    for _ in range(601):
+        encoder.encode(bytes(1024 * 768 * 2))
+    events = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
+    assert [event["frame"] for event in events] == [1, 601]
+    assert all(event["wire_bytes"] == 8 for event in events)
+    assert all(event["source_bytes"] == 1572864 for event in events)

@@ -7,6 +7,7 @@ original RGB565 bit survives RGB888 expansion and the format's one-bit tag.
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import numpy as np
@@ -42,17 +43,34 @@ class Rle24Encoder:
         self.pixel_count = pixel_count
         self._source: bytes | None = None
         self._wire: bytes = b""
+        self._frames = 0
 
     def encode(self, frame: bytes) -> bytes:
         if len(frame) != self.pixel_count * 2:
             raise ValueError(f"RGB565 frame bytes={len(frame)}; expected {self.pixel_count * 2}")
-        if frame is self._source or frame == self._source:
-            self._source = frame
-            return self._wire
-        pixels = np.frombuffer(dword_swap_frame(frame), dtype="<u2")
-        self._wire = _encode_runs(pixels)
+        if frame is not self._source and frame != self._source:
+            pixels = np.frombuffer(dword_swap_frame(frame), dtype="<u2")
+            self._wire = _encode_runs(pixels)
         self._source = frame
+        self._report_wire_size()
         return self._wire
+
+    def _report_wire_size(self) -> None:
+        self._frames += 1
+        if self._frames % 600 != 1:
+            return
+        print(
+            json.dumps(
+                {
+                    "event": "usb_wire_compression",
+                    "frame": self._frames,
+                    "source_bytes": self.pixel_count * 2,
+                    "wire_bytes": len(self._wire),
+                    "wire_to_source_ratio": round(len(self._wire) / (self.pixel_count * 2), 4),
+                }
+            ),
+            flush=True,
+        )
 
 
 def _rgb565_literal_words(colors: np.ndarray) -> np.ndarray:
