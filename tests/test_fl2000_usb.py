@@ -24,3 +24,15 @@ def test_line_buffer_flags_match_fresco_status_bitfield():
 
     assert status_flags(1 << 8) == ["lbuf_udf"]
     assert status_flags(1 << 9) == ["lbuf_ovf"]
+
+
+def test_observer_can_open_without_resetting_live_usb_configuration():
+    import types
+
+    calls = []
+    device = types.SimpleNamespace(set_configuration=lambda: calls.append("configure"))
+    observer = FL2000(dev=device, configure=False)
+    assert observer.dev is device
+    assert not calls
+    FL2000(dev=device)
+    assert calls == ["configure"]
