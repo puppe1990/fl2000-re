@@ -66,3 +66,15 @@ def test_bring_up_hdmi_aborts_without_it66121(monkeypatch):
     monkeypatch.setattr(hdmi, "cmd_detect", lambda _fl: 1)
     assert hdmi.bring_up_hdmi(fl, MODE_640x480) == 1
     assert REG_PLL not in fl.dev.regs
+
+
+def test_modeset_keeps_scanout_pll_active_without_changing_eof_or_reserved_controls():
+    fl = _fake_fl()
+    preserved = (1 << 31) | (1 << 30) | (1 << 15)
+    fl.dev.regs[REG_ACLK] = preserved
+    hdmi._program_fl2000_mode_registers(fl, MODE_640x480, 0)
+    aclk = fl.dev.regs[REG_ACLK]
+    assert aclk & (1 << 26), "Active scanout must force PLL awake"
+    assert aclk & (1 << 28), "Every frame must still use explicit ZLP EOF"
+    assert aclk & preserved == preserved
+    assert fl.dev.regs[REG_PLL] == MODE_640x480.pll

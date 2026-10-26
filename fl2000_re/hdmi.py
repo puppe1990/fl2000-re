@@ -72,6 +72,10 @@ def _program_fl2000_mode_registers(fl: FL2000, mode: VideoMode, v_shift: int = 0
     time.sleep(0.02)
     if fl.reg_read(REG_PLL) != mode.pll:
         print(f"  PLL readback mismatch: 0x{fl.reg_read(REG_PLL):08X}")
+    # Keep the pixel-clock PLL awake during USB backpressure, as the independent
+    # FL2000/IT66121 driver does in fl2000_set_pll(). This changes power policy,
+    # not the PLL frequency or raster: https://github.com/klogg/fl2000_drm
+    fl.bit_set(REG_ACLK, 26)
     for bit in (22, 24, 19, 21, 13, 27, 28, 29):
         fl.bit_clear(REG_ACLK, bit)
     fl.bit_set(REG_ACLK, 28)  # EOF = ZLP; required or bulk NAKs forever

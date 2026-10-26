@@ -137,3 +137,9 @@ still uses the separate nonblocking frame lock: if the writer is busy or suspend
 repeats its last complete frame. Telemetry is approximate and does not synchronize pixel ownership.
 This removes one software starvation path; physical USB timeouts still require long-running hardware
 validation.
+
+During modeset, ACLK bit 26 keeps the scanout PLL powered, following
+[`fl2000_set_pll()` in the independent FL2000/IT66121 driver](https://github.com/klogg/fl2000_drm/blob/master/fl2000_registers.c).
+The observed adapter had this bit clear while streaming. This changes only clock power policy; PLL
+frequency, raster, RGB565 pixels and explicit EOF remain unchanged. It is a hardware stability
+experiment, not proof that every partial USB timeout originates in clock gating.
