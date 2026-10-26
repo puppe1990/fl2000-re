@@ -77,6 +77,12 @@ tests/test_<module>.py    mirrors the package
 - Every bulk frame MUST end with a zero-length packet. The chip's EOF is the ZLP (REG_ACLK bit 28),
   not the transfer's short packet; the reference driver submits one per frame unconditionally.
   Gating it on 512-byte alignment broke 1440x900 (2026-10-23).
+- RLE chip erratum: every compressed raster MUST finish with a literal pixel, never a repeat count
+  (`FrescoLogic/FL2000/src/fl2000_compression.c`, final-run termination). A software decoder
+  roundtrip alone does not verify this restriction. Keep `tests/test_rle_hardware_erratum.py`.
+- Clone/extend compression belongs in the isolated capture child, outside the frame publication
+  lock. USB consumes complete `EncodedWireFrame` snapshots without waiting or re-encoding. Native
+  RLE must stay byte-identical to the reference AND satisfy the final-literal erratum.
 - The LaunchAgent plist needs `ProcessType=Interactive`. At 2.6 MB/frame, Standard QoS capped the
   pump at ~44 fps.
 - `extend` makes the virtual desktop 1x at exactly the HDMI mode (1024x768 for the agent). Do not

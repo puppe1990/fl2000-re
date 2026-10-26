@@ -1,5 +1,32 @@
 # Handoff — fl2000-re
 
+## Estado atual — 2026-10-26 (prioridade sobre os perfis históricos abaixo)
+
+- HDMI **1024×768@60**, virtual **1280×960**. Não retornar a 640×480: o usuário rejeitou a qualidade
+  de leitura desse perfil antigo.
+- PR #54 corrigiu uma violação do protocolo RLE: o último token do raster precisa ser um pixel
+  literal, conforme erratum do chip no driver Fresco. O encoder anterior podia terminar em contagem;
+  os testes de roundtrip passavam apesar disso. Ambos os encoders estão corrigidos, com regressão
+  independente do token final e golden bytes; **479 testes**, Ruff e Prettier.
+- RLE é preparado no filho de captura e publicado inteiro com comprimento/geração sob o mesmo lock.
+  USB só tenta o lock sem esperar e reenvia o último payload pronto. O encoder C reutiliza memória;
+  sem compilador há fallback NumPy. Nenhuma perda dos bits RGB565 originais.
+- Perfis locais ativos nesta máquina em `~/Library/Application Support/fl2000-re/`:
+  `video-mode=1024x768`, `usb-wire-codec=rle24`, `usb-burst-profile=burst16`, `usb-queue-depth=4`.
+  Defaults portáveis continuam raw/single/0. Não ativar a experiência antiga `usb-native-sync`:
+  permanece desativada e não faz parte desta correção.
+- Fila mantém quatro pares pixels/EOF imutáveis, sem retry. Faz cancel/drain antes de liberar
+  buffers/interfaces; guarda buffers se callbacks não drenarem. Rajada maior exige descriptor
+  SuperSpeed de IF1/alt0 com bMaxBurst=15 e mantém IF0/alt0 sem EP1 duplicado.
+- Listener persistente `com.fl2000-re.usb-listener`: log da aplicação + consulta ao kernel
+  persistido; saída `~/Library/Logs/fl2000-re-faults.jsonl`. Observador HDMI ativo. O contador
+  STATUS pode saturar em 65535: `scanout_fps=0` nesse ponto não prova tela apagada.
+- Tentativas de transporte sem corrigir o token final ainda tiveram timeouts. O patch do erratum
+  está sob acompanhamento físico; uma amostra curta ou CI verde não prova estabilidade longa.
+  Identifique sempre a sessão fixa de início e conte reinícios desde ela, sem olhar apenas o tail.
+- Para reiniciar de forma controlada: `launchctl kill SIGINT gui/$(id -u)/com.fl2000-re.extend`. O
+  helper é encerrado pelo fluxo normal. Não usar `pkill` nem matar o serviço para documentar.
+
 Resumo do estado do projeto, do que foi medido no hardware e do que falta. Leia junto com
 `AGENTS.md` (regras) e `README.md` (uso).
 
