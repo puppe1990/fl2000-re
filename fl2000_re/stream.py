@@ -16,26 +16,16 @@ from fl2000_re.capture import (
     grab_letterboxed_rgb,
     grab_via_screencapture,
 )
-from fl2000_re.capture_pacing import (
-    CAPTURE_LEAD as CAPTURE_LEAD,
-)
-from fl2000_re.capture_pacing import (
-    EXTEND_CAPTURE_FPS as EXTEND_CAPTURE_FPS,
-)
-from fl2000_re.capture_pacing import (
-    FLUID_CAPTURE_FPS as FLUID_CAPTURE_FPS,
-)
+from fl2000_re.capture_pacing import CAPTURE_LEAD as CAPTURE_LEAD
+from fl2000_re.capture_pacing import EXTEND_CAPTURE_FPS as EXTEND_CAPTURE_FPS
+from fl2000_re.capture_pacing import FLUID_CAPTURE_FPS as FLUID_CAPTURE_FPS
 from fl2000_re.capture_pacing import IDLE_CAPTURE_FPS as IDLE_CAPTURE_FPS
 from fl2000_re.capture_pacing import USB_FEED_LEAD, usb_feed_period_s
 from fl2000_re.capture_pacing import (
     _sleep_until_tick as _sleep_until_tick,
 )
-from fl2000_re.capture_pacing import (
-    capture_backoff_s as capture_backoff_s,
-)
-from fl2000_re.capture_pacing import (
-    capture_fps_for_idle as capture_fps_for_idle,
-)
+from fl2000_re.capture_pacing import capture_backoff_s as capture_backoff_s
+from fl2000_re.capture_pacing import capture_fps_for_idle as capture_fps_for_idle
 from fl2000_re.capture_pacing import (
     capture_period_s as capture_period_s,
 )
@@ -240,6 +230,7 @@ def cmd_extend(
     cursor: bool = True,
     capture_fps: int | None = None,
     virtual_size: tuple[int, int] | None = None,
+    startup_preview: bool = True,
 ) -> int:
     """Create a WindowServer display and pump it to the Hagibis (not a clone of the Air).
 
@@ -266,9 +257,11 @@ def cmd_extend(
             "Arraste janelas para o monitor 'Hagibis'."
         )
         print("  os dois HDMI do Hagibis continuam o mesmo stream.")
-        rgb, captured = _grab_preview_rgb(
-            mode, lambda: grab_via_screencapture(screen.display_id), underscan, stretch_x
-        )
+        rgb, captured = bytes(mode.width * mode.height * 3), False
+        if startup_preview:
+            rgb, captured = _grab_preview_rgb(
+                mode, lambda: grab_via_screencapture(screen.display_id), underscan, stretch_x
+            )
         if captured:
             Image.frombytes("RGB", (mode.width, mode.height), rgb).save("preview.png")
             print("  gravou preview.png (o que vai pro HDMI)")

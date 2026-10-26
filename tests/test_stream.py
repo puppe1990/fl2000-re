@@ -1273,3 +1273,13 @@ def test_pump_uses_feed_headroom_and_still_sends_every_frame(monkeypatch):
     assert sent == len(periods) > 1
     assert periods == pytest.approx([usb_feed_period_s(60)] * sent)
     assert len(fl.dev.packets) == sent * 2
+
+
+def test_agent_startup_does_not_wait_for_synchronous_preview(monkeypatch, tmp_path):
+    seen = _stub_extend_preview(monkeypatch, tmp_path)
+    fl = FL2000(dev=FakeBulkDevice())
+    rc = stream.cmd_extend(fl, 0.01, underscan=1.0, mode=MODE_640x480, startup_preview=False)
+    assert rc == 0
+    assert "preview_id" not in seen
+    assert not (tmp_path / "preview.png").exists()
+    assert seen["brought_up"]
