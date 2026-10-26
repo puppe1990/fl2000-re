@@ -6,6 +6,7 @@ import types
 
 import pytest
 from fl2000_re import mac_activity as activity
+from fl2000_re import native_bridge as bridge
 
 
 def test_video_activity_ends_retained_token_exactly_once():
@@ -69,12 +70,12 @@ def test_native_bridge_is_built_once_per_source_and_architecture(monkeypatch, tm
         activity.Path(command[-1]).write_bytes(b"compiled")
 
     monkeypatch.setattr(activity.subprocess, "run", compile_bridge)
-    monkeypatch.setattr(activity.platform, "machine", lambda: "arm64")
-    first = activity._build_activity_library(source, cache)
-    assert activity._build_activity_library(source, cache) == first
+    monkeypatch.setattr(bridge.platform, "machine", lambda: "arm64")
+    first = bridge.build_native_bridge(source, cache)
+    assert bridge.build_native_bridge(source, cache) == first
     assert len(builds) == 1
     source.write_text("changed source")
-    assert activity._build_activity_library(source, cache) != first
+    assert bridge.build_native_bridge(source, cache) != first
     assert len(builds) == 2
     assert not list(cache.glob("*.partial"))
 
@@ -89,7 +90,7 @@ def test_failed_build_never_leaves_loadable_partial_library(monkeypatch, tmp_pat
 
     monkeypatch.setattr(activity.subprocess, "run", failed_build)
     with pytest.raises(subprocess.CalledProcessError):
-        activity._build_activity_library(source, cache)
+        bridge.build_native_bridge(source, cache)
     assert list(cache.iterdir()) == []
 
 

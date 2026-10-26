@@ -90,3 +90,13 @@ def test_source_hash_tracks_native_activity_bridge(tmp_path):
     first = sessions.source_fingerprint(tmp_path)
     bridge.write_text("begin changed activity")
     assert sessions.source_fingerprint(tmp_path) != first
+
+
+def test_source_hash_tracks_native_c_transaction(tmp_path):
+    native = tmp_path / "native"
+    native.mkdir()
+    source = native / "sync_frame.c"
+    source.write_text("first transaction")
+    first = sessions.source_fingerprint(tmp_path)
+    source.write_text("changed transaction")
+    assert sessions.source_fingerprint(tmp_path) != first

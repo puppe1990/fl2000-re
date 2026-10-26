@@ -21,6 +21,9 @@ def send_frame(fl: FL2000, frame: bytes) -> None:
     PyUSB/libusb1 can return a short byte count after a timeout without raising.
     Example: send_frame(fl, packed_frame)
     """
+    if getattr(fl, "native_frame_sender", None) is not None:
+        _send_native_frame(fl, frame)
+        return
     sent, bulk_ms = _write_phase(fl, frame, BULK_TIMEOUT_MS, "pixels")
     if sent != len(frame):
         _transfer_event("usb_frame_incomplete", "pixels", bulk_ms, sent, len(frame))
@@ -81,3 +84,35 @@ def _transfer_event(
         ),
         flush=True,
     )
+
+
+def _send_native_frame(fl: FL2000, frame: bytes) -> None:
+    result = fl.native_frame_sender.send(frame, BULK_TIMEOUT_MS, EOF_TIMEOUT_MS)
+    expected = len(frame) if result.phase == "pixels" else 0
+    elapsed = result.pixel_ms + result.eof_ms
+    if result.status or result.written != expected:
+        _transfer_event(
+            "usb_transfer_error",
+            result.phase,
+            elapsed,
+            result.written,
+            expected,
+            transport="native_sync",
+            status=result.status,
+        )
+        raise usb.core.USBError(
+            f"native USB {result.phase}: status={result.status}, bytes={result.written}; "
+            f"expected status=0, bytes={expected}. No retry.",
+            error_code=result.status,
+        )
+    if elapsed >= SLOW_TRANSFER_MS:
+        _transfer_event(
+            "usb_frame_slow",
+            "frame",
+            elapsed,
+            len(frame),
+            len(frame),
+            transport="native_sync",
+            bulk_ms=result.pixel_ms,
+            eof_ms=result.eof_ms,
+        )

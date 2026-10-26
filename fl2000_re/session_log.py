@@ -26,6 +26,7 @@ def source_fingerprint(root: Path) -> str:
     """
     paths = sorted((root / "fl2000_re").glob("*.py"))
     paths += sorted((root / "native").glob("*.m"))
+    paths += sorted((root / "native").glob("*.c"))
     paths += [root / "native" / "hagibis_virtual_display"]
     digest = hashlib.sha256()
     for path in paths:

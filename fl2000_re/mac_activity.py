@@ -3,15 +3,14 @@
 from __future__ import annotations
 
 import ctypes
-import hashlib
 import json
-import os
-import platform
 import subprocess
 import sys
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
+
+from fl2000_re.native_bridge import build_native_bridge
 
 
 @dataclass
@@ -31,44 +30,10 @@ class VideoActivity:
         self.end(token)
 
 
-def _activity_library_path(source: Path, cache: Path) -> Path:
-    digest = hashlib.sha256(source.read_bytes()).hexdigest()[:16]
-    return cache / f"video-activity-{platform.machine()}-{digest}.dylib"
-
-
-def _build_activity_library(source: Path, cache: Path) -> Path:
-    library = _activity_library_path(source, cache)
-    if library.is_file():
-        return library
-    cache.mkdir(parents=True, exist_ok=True)
-    temporary = library.with_suffix(f".{os.getpid()}.dylib")
-    try:
-        subprocess.run(
-            [
-                "clang",
-                "-dynamiclib",
-                "-fobjc-arc",
-                "-O2",
-                "-framework",
-                "Foundation",
-                str(source),
-                "-o",
-                str(temporary),
-            ],
-            check=True,
-            capture_output=True,
-            timeout=20,
-        )
-        temporary.replace(library)
-    finally:
-        temporary.unlink(missing_ok=True)
-    return library
-
-
 def _load_activity_library():
     source = Path(__file__).resolve().parent.parent / "native" / "video_activity.m"
     cache = Path.home() / "Library" / "Caches" / "fl2000-re"
-    library = ctypes.CDLL(str(_build_activity_library(source, cache)))
+    library = ctypes.CDLL(str(build_native_bridge(source, cache)))
     library.fl2000_begin_video_activity.argtypes = []
     library.fl2000_begin_video_activity.restype = ctypes.c_void_p
     library.fl2000_end_video_activity.argtypes = [ctypes.c_void_p]

@@ -156,3 +156,12 @@ difference alone does not establish a cause of the earlier partial timeouts.
 Selection is restricted to macOS SuperSpeed devices whose IF1/alt1 bulk EP1 includes the complete
 single-packet SuperSpeed companion descriptor. Other platforms, USB 2 and unsupported/missing
 descriptors keep the original control-interface route.
+
+A separate native synchronous experiment is enabled by
+`~/Library/Application Support/fl2000-re/usb-native-sync` containing `1` (absent/`0` keeps PyUSB).
+It sends pixels and the explicit EOF back to back in a cached C bridge, using the exact libusb
+function/handle already opened by PyUSB. There is one transfer at a time, no asynchronous queue, no
+repeated failed frame and no Python array copy or interpreter transition between the two phases.
+Native return codes and byte counts are checked independently, including EOF timeouts. This targets
+small cadence gaps while retaining the single-packet route; physical flicker still needs direct
+observation. The cache builder supports C and Objective-C bridges atomically.
