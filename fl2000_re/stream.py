@@ -53,6 +53,7 @@ from fl2000_re.fl2000_usb import FL2000
 from fl2000_re.hdmi import bring_up_hdmi
 from fl2000_re.letterbox import UNDERSCAN
 from fl2000_re.link_watch import start_link_watch, stop_link_watch
+from fl2000_re.mac_activity import begin_video_activity
 from fl2000_re.pixels import dword_swap_frame, make_bars_rgb565, pack_frame
 from fl2000_re.session_log import end_stream_session, record_frame_ready, start_stream_session
 from fl2000_re.sleep_clock import read_sleep_clocks as _read_clocks
@@ -320,6 +321,7 @@ def _pace_clone(
     t0 = time.monotonic()
     sent = 0
     rc = 1
+    video_activity = begin_video_activity()
     try:
         sent = _pump_paced_frames(fl, capture, mode, seconds, t0, label, cursor)
         rc = 0 if sent else 1
@@ -335,6 +337,8 @@ def _pace_clone(
         print(f"  {exc}", flush=True)
         rc = 1
     finally:
+        if video_activity is not None:
+            video_activity.close()
         stop_link_watch(link_watch)
         sent = capture.sent_frames
         capture.stop_and_join()

@@ -1283,3 +1283,24 @@ def test_agent_startup_does_not_wait_for_synchronous_preview(monkeypatch, tmp_pa
     assert "preview_id" not in seen
     assert not (tmp_path / "preview.png").exists()
     assert seen["brought_up"]
+
+
+@pytest.mark.parametrize("failure", [None, KeyboardInterrupt(), stream.usb.core.USBError("forced")])
+def test_video_activity_ends_on_normal_exit_interrupt_and_usb_failure(monkeypatch, failure):
+    from fl2000_re.mac_activity import VideoActivity
+
+    ended = []
+    monkeypatch.setattr(mp, "Process", FakeProcess)
+    monkeypatch.setattr(stream, "release_bulk", lambda fl: None)
+    monkeypatch.setattr(stream, "begin_video_activity", lambda: VideoActivity(42, ended.append))
+
+    def pump(fl, capture, *args):
+        capture.sent_frames = 1
+        if failure is not None:
+            raise failure
+        return 1
+
+    monkeypatch.setattr(stream, "_pump_paced_frames", pump)
+    result = stream._pace_clone(FL2000(dev=FakeBulkDevice()), bytes(512), MODE_640x480, None, 1)
+    assert result == int(isinstance(failure, stream.usb.core.USBError))
+    assert ended == [42]
