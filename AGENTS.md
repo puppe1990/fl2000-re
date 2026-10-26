@@ -84,6 +84,9 @@ tests/test_<module>.py    mirrors the package
 - `--virtual WxH` must match the HDMI mode's aspect or the fit letterboxes: 1280x960 → 1024x768 is
   the agent profile (UI ~20% smaller). Small downscales take the direct LANCZOS path and the
   0.7/350/2 unsharp; the 2x oversample capped capture at ~10 fps (2026-10-24).
+- Reading preference (2026-10-26): user rejected 640x480 text quality. Local profile file
+  `~/Library/Application Support/fl2000-re/video-mode` is `1024x768` (standard 60 Hz), virtual
+  1280x960. Preserve this resolution; do not automatically downgrade it to mask transport faults.
 - The capture child runs `nice(5)`: at ~45 ms/grab it must not steal ticks from the 60 Hz bulk pump.
   Keep it unless the child is measured as the bottleneck.
 - Both Hagibis HDMIs always show the same FL2000 stream. Native USB-C HDMI is a separate GPU pipe
