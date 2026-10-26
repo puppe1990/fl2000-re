@@ -106,7 +106,12 @@ def _claim_bulk_alt1(fl: FL2000) -> int:
     try:
         with contextlib.suppress(usb.core.USBError):
             usb.util.claim_interface(fl.dev, 0)
-        fl.dev.set_interface_altsetting(0, 1)
+        usb.util.claim_interface(fl.dev, 1)
+        # This alternate exposes EP1 bulk with bMaxBurst=0 instead of 15.
+        # Disable the duplicate EP1 on control IF0 so PyUSB selects streaming IF1.
+        fl.dev.set_interface_altsetting(0, 0)
+        fl.dev.set_interface_altsetting(1, 1)
+        print("  USB bulk: interface 1 alt 1, rajada maxima de 1 pacote (teste).")
     except usb.core.USBError as exc:
         print(
             f"  USB claim falhou ({exc}). Desconecta e reconecta o USB-A do HAGIBIS e rode de novo."

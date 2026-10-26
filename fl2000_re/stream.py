@@ -100,8 +100,9 @@ def woke_from_sleep(gap_s: float, threshold_s: float = WAKE_GAP_S) -> bool:
 
 
 def release_bulk(fl: FL2000) -> None:
-    with contextlib.suppress(usb.core.USBError):
-        usb.util.release_interface(fl.dev, 0)
+    for interface in (1, 0):
+        with contextlib.suppress(usb.core.USBError):
+            usb.util.release_interface(fl.dev, interface)
 
 
 def link_warning(usb_speed: int | None, mode: VideoMode) -> str | None:

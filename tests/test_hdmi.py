@@ -66,3 +66,19 @@ def test_bring_up_hdmi_aborts_without_it66121(monkeypatch):
     monkeypatch.setattr(hdmi, "cmd_detect", lambda _fl: 1)
     assert hdmi.bring_up_hdmi(fl, MODE_640x480) == 1
     assert REG_PLL not in fl.dev.regs
+
+
+def test_single_packet_burst_uses_streaming_interface_without_duplicate_ep(monkeypatch):
+    calls = []
+
+    class Device:
+        def set_interface_altsetting(self, interface, alt):
+            calls.append(("alt", interface, alt))
+
+        def clear_halt(self, endpoint):
+            calls.append(("clear", endpoint))
+
+    fl = FL2000(dev=Device(), configure=False)
+    monkeypatch.setattr(hdmi.usb.util, "claim_interface", lambda dev, i: calls.append(("claim", i)))
+    assert hdmi._claim_bulk_alt1(fl) == 0
+    assert calls == [("claim", 0), ("claim", 1), ("alt", 0, 0), ("alt", 1, 1), ("clear", 1)]
