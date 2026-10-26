@@ -13,6 +13,7 @@ from pathlib import Path
 import numpy as np
 import usb.core
 
+from fl2000_re.native_rle import optional_native_encoder
 from fl2000_re.pixels import dword_swap_frame
 from fl2000_re.video_modes import VideoMode, pll_pixel_clock
 
@@ -51,6 +52,7 @@ class Rle24Encoder:
         self._source: bytes | None = None
         self._wire: bytes = b""
         self._frames = 0
+        self._native = optional_native_encoder(pixel_count)
 
     def encode(self, frame: bytes) -> bytes:
         if isinstance(frame, EncodedWireFrame):
@@ -61,8 +63,11 @@ class Rle24Encoder:
         if len(frame) != self.pixel_count * 2:
             raise ValueError(f"RGB565 frame bytes={len(frame)}; expected {self.pixel_count * 2}")
         if frame is not self._source and frame != self._source:
-            pixels = np.frombuffer(dword_swap_frame(frame), dtype="<u2")
-            self._wire = _encode_runs(pixels)
+            if self._native is not None:
+                self._wire = self._native.encode(frame)
+            else:
+                pixels = np.frombuffer(dword_swap_frame(frame), dtype="<u2")
+                self._wire = _encode_runs(pixels)
         self._source = frame
         self._report_wire_size()
         return self._wire
@@ -77,6 +82,7 @@ class Rle24Encoder:
                     "event": "usb_wire_compression",
                     "frame": self._frames,
                     "source_bytes": self.pixel_count * 2,
+                    "encoder_backend": "native" if self._native is not None else "numpy",
                     "wire_bytes": len(self._wire),
                     "wire_to_source_ratio": round(len(self._wire) / (self.pixel_count * 2), 4),
                 }

@@ -183,3 +183,9 @@ worst-case RGB888/RLE expansion. Length, content and generation publish under th
 feeder only tries that lock without waiting and keeps its previous complete payload if the writer is
 busy. Encoding, scaling or capture stalls therefore do not block repeated USB frames or their
 mandatory EOF. The initial frame is encoded once before the timed pump starts.
+
+An optional portable C codec reuses one output allocation and replaces the vectorized RLE temporary
+arrays. It produces byte-identical output to the Python reference, including lane order, run
+boundaries and padding. The library is compiled once into the user cache before pumping; systems
+without a C compiler retain the reference implementation. Native calls run in the capture child for
+clone/extend and never perform USB access. Logs identify the encoder backend.
