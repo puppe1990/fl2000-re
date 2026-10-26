@@ -5,7 +5,7 @@ from __future__ import annotations
 import contextlib
 import time
 from collections.abc import Callable
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import usb.core
 
@@ -20,6 +20,9 @@ from fl2000_re.registers import (
     RT_IN,
     RT_OUT,
 )
+
+if TYPE_CHECKING:
+    from fl2000_re.wire_codec import Rle24Encoder
 
 
 class DongleNotFoundError(FileNotFoundError):
@@ -39,6 +42,7 @@ class FL2000:
         find_device: Callable[..., Any] = usb.core.find,
         configure: bool = True,
     ) -> None:
+        self.wire_encoder: Rle24Encoder | None = None
         self.dev = (
             dev
             if dev is not None

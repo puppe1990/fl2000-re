@@ -164,3 +164,18 @@ def test_unavailable_streaming_interface_does_not_change_alternates(monkeypatch)
     monkeypatch.setattr(hdmi.usb.util, "claim_interface", claim)
     assert hdmi._claim_bulk_alt1(FL2000(dev=device, configure=False)) == 1
     assert calls == [("claim", 0), ("claim", 1)]
+
+
+def test_rle24_selects_rgb888_compression_after_format_watermark_reset(monkeypatch):
+    from fl2000_re.registers import REG_PXCLK
+    from fl2000_re.wire_codec import Rle24Encoder
+
+    fl = _fake_fl()
+    monkeypatch.setattr(hdmi, "make_wire_encoder", lambda dev, count, bpp: Rle24Encoder(count))
+    hdmi._program_fl2000_mode_registers(fl, MODE_640x480, 0)
+    pixel_control = fl.dev.regs[REG_PXCLK]
+    assert pixel_control & (1 << 24)
+    assert not pixel_control & ((1 << 6) | (1 << 31) | (1 << 25))
+    assert pixel_control & (1 << 7)
+    assert fl.dev.regs[REG_ACLK] & (1 << 28)
+    assert fl.dev.regs[REG_PLL] == MODE_640x480.pll

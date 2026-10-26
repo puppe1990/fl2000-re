@@ -21,6 +21,8 @@ def send_frame(fl: FL2000, frame: bytes) -> None:
     PyUSB/libusb1 can return a short byte count after a timeout without raising.
     Example: send_frame(fl, packed_frame)
     """
+    if getattr(fl, "wire_encoder", None) is not None:
+        frame = fl.wire_encoder.encode(frame)
     sent, bulk_ms = _write_phase(fl, frame, BULK_TIMEOUT_MS, "pixels")
     if sent != len(frame):
         _transfer_event("usb_frame_incomplete", "pixels", bulk_ms, sent, len(frame))

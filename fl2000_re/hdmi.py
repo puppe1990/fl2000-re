@@ -33,6 +33,7 @@ from fl2000_re.registers import (
     REG_VSYNC2,
 )
 from fl2000_re.video_modes import MODE_640x480, VideoMode, pxclk_color_bit, shift_vsync2
+from fl2000_re.wire_codec import make_wire_encoder
 
 
 def bring_up_hdmi(fl: FL2000, mode: VideoMode, v_shift: int = 0) -> int:
@@ -65,6 +66,7 @@ def _reset_and_power_ite(fl: FL2000, ite: IT66121) -> None:
 
 
 def _program_fl2000_mode_registers(fl: FL2000, mode: VideoMode, v_shift: int = 0) -> None:
+    fl.wire_encoder = make_wire_encoder(fl.dev, mode.width * mode.height, mode.bpp)
     fl.bit_clear(REG_USB_CTRL, 17)
     fl.bit_set(REG_USB_LPM, 19)
     fl.bit_set(REG_USB_LPM, 20)
@@ -79,7 +81,11 @@ def _program_fl2000_mode_registers(fl: FL2000, mode: VideoMode, v_shift: int = 0
     for bit in (28, 6, 31, 24, 25, 26, 27):
         fl.bit_clear(REG_PXCLK, bit)
     fl.bit_set(REG_PXCLK, 0)
-    fl.bit_set(REG_PXCLK, pxclk_color_bit(mode.bpp))
+    if fl.wire_encoder is None:
+        fl.bit_set(REG_PXCLK, pxclk_color_bit(mode.bpp))
+    else:
+        fl.bit_set(REG_PXCLK, 24)
+        print("  USB wire: RGB888/RLE24, mantendo todos os bits do RGB565 de origem.")
     fl.bit_set(REG_PXCLK, 7)
     for off, val in (
         (REG_HSYNC1, mode.h_sync_1),

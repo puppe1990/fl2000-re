@@ -77,6 +77,8 @@ def start_stream_session(
                 "hdmi": [mode.width, mode.height, mode.freq],
                 "pixel_clock_hz": mode.pixclk,
                 "frame_bytes": mode.width * mode.height * mode.bpp,
+                "wire_codec": "rle24" if getattr(fl, "wire_encoder", None) else "raw",
+                "variable_wire_bytes": getattr(fl, "wire_encoder", None) is not None,
                 "bulk_block_bytes": mode.width * mode.height * mode.bpp,
                 "capture_fps": capture_fps,
                 "display_id": display_id,
