@@ -145,3 +145,14 @@ allowed. A small Objective-C bridge is compiled once into the user cache, outsid
 unavailable tooling/API logs a nonfatal event. This follows
 [Apple's activity guidance](https://developer.apple.com/documentation/foundation/processinfo) and
 does not guarantee that a physical USB endpoint will remain responsive.
+
+The single-packet-burst experiment disables duplicate EP1 on control interface 0 (alternate 0) and
+selects streaming interface 1 alternate 1. On the observed adapter its SuperSpeed companion has
+`bMaxBurst=0`; interface 0 alternate 1 and interface 1 alternate 0 advertise `bMaxBurst=15`. Pixels
+still use bulk OUT endpoint 1 and explicit EOF, with the same timing and wire format. The experiment
+also claims/releases streaming interface 1. This tests host/burst interaction; the descriptor
+difference alone does not establish a cause of the earlier partial timeouts.
+
+Selection is restricted to macOS SuperSpeed devices whose IF1/alt1 bulk EP1 includes the complete
+single-packet SuperSpeed companion descriptor. Other platforms, USB 2 and unsupported/missing
+descriptors keep the original control-interface route.

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import contextlib
+import sys
 import time
 
 import usb.core
@@ -106,7 +107,7 @@ def _claim_bulk_alt1(fl: FL2000) -> int:
     try:
         with contextlib.suppress(usb.core.USBError):
             usb.util.claim_interface(fl.dev, 0)
-        fl.dev.set_interface_altsetting(0, 1)
+        _select_video_bulk_alt(fl)
     except usb.core.USBError as exc:
         print(
             f"  USB claim falhou ({exc}). Desconecta e reconecta o USB-A do HAGIBIS e rode de novo."
@@ -115,3 +116,32 @@ def _claim_bulk_alt1(fl: FL2000) -> int:
     with contextlib.suppress(usb.core.USBError):
         fl.dev.clear_halt(BULK_EP)
     return 0
+
+
+def _select_video_bulk_alt(fl: FL2000) -> None:
+    if sys.platform != "darwin" or not _has_single_packet_bulk_alt(fl.dev):
+        fl.dev.set_interface_altsetting(0, 1)
+        return
+    usb.util.claim_interface(fl.dev, 1)
+    # Remove duplicate EP1 so PyUSB selects the single-packet stream.
+    fl.dev.set_interface_altsetting(0, 0)
+    fl.dev.set_interface_altsetting(1, 1)
+    print("  USB bulk: interface 1 alt 1, rajada maxima de 1 pacote.")
+
+
+def _has_single_packet_bulk_alt(device: usb.core.Device) -> bool:
+    if getattr(device, "speed", 0) < 4:
+        return False
+    interfaces = (
+        i
+        for i in device.get_active_configuration()
+        if (i.bInterfaceNumber, i.bAlternateSetting) == (1, 1)
+    )
+    endpoints = (ep for interface in interfaces for ep in interface)
+    return any(
+        ep.bEndpointAddress == BULK_EP
+        and ep.bmAttributes & 3 == 2
+        and len(ep.extra_descriptors) >= 6
+        and bytes(ep.extra_descriptors)[:3] == b"\x06\x30\x00"
+        for ep in endpoints
+    )

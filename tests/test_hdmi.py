@@ -66,3 +66,101 @@ def test_bring_up_hdmi_aborts_without_it66121(monkeypatch):
     monkeypatch.setattr(hdmi, "cmd_detect", lambda _fl: 1)
     assert hdmi.bring_up_hdmi(fl, MODE_640x480) == 1
     assert REG_PLL not in fl.dev.regs
+
+
+def test_single_packet_burst_uses_streaming_interface_without_duplicate_ep(monkeypatch):
+    monkeypatch.setattr(hdmi.sys, "platform", "darwin")
+    calls = []
+
+    class Device:
+        speed = 4
+
+        def get_active_configuration(self):
+            return [_SinglePacketBulkAlt()]
+
+        def set_interface_altsetting(self, interface, alt):
+            calls.append(("alt", interface, alt))
+
+        def clear_halt(self, endpoint):
+            calls.append(("clear", endpoint))
+
+    fl = FL2000(dev=Device(), configure=False)
+    monkeypatch.setattr(hdmi.usb.util, "claim_interface", lambda dev, i: calls.append(("claim", i)))
+    assert hdmi._claim_bulk_alt1(fl) == 0
+    assert calls == [("claim", 0), ("claim", 1), ("alt", 0, 0), ("alt", 1, 1), ("clear", 1)]
+
+
+class _SinglePacketBulkAlt(list):
+    bInterfaceNumber, bAlternateSetting = 1, 1
+
+    def __init__(self, companion=b"\x06\x30\x00\x00\x00\x00"):
+        import types
+
+        super().__init__(
+            [types.SimpleNamespace(bEndpointAddress=1, bmAttributes=2, extra_descriptors=companion)]
+        )
+
+
+def test_usb2_keeps_original_bulk_route_without_probing_superspeed_descriptors(monkeypatch):
+    import types
+
+    calls = []
+    device = types.SimpleNamespace(
+        speed=3,
+        set_interface_altsetting=lambda i, alt: calls.append((i, alt)),
+        clear_halt=lambda ep: None,
+    )
+    monkeypatch.setattr(hdmi.usb.util, "claim_interface", lambda dev, i: None)
+    assert hdmi._claim_bulk_alt1(FL2000(dev=device, configure=False)) == 0
+    assert calls == [(0, 1)]
+
+
+def test_superspeed_without_single_packet_bulk_alt_is_not_reconfigured():
+    import types
+
+    device = types.SimpleNamespace(
+        speed=4, get_active_configuration=lambda: [_SinglePacketBulkAlt(b"")]
+    )
+    assert not hdmi._has_single_packet_bulk_alt(device)
+    device.get_active_configuration = lambda: [_SinglePacketBulkAlt(b"\x06\x30\x00")]
+    assert not hdmi._has_single_packet_bulk_alt(device)
+    device.get_active_configuration = lambda: [_SinglePacketBulkAlt(b"\x06\x30\x0f\x00\x00\x00")]
+    assert not hdmi._has_single_packet_bulk_alt(device)
+
+
+def test_other_platforms_keep_original_bulk_selection(monkeypatch):
+    import types
+
+    calls = []
+    device = types.SimpleNamespace(
+        speed=4,
+        get_active_configuration=lambda: [_SinglePacketBulkAlt()],
+        set_interface_altsetting=lambda i, alt: calls.append((i, alt)),
+        clear_halt=lambda ep: None,
+    )
+    monkeypatch.setattr(hdmi.sys, "platform", "linux")
+    monkeypatch.setattr(hdmi.usb.util, "claim_interface", lambda dev, i: None)
+    assert hdmi._claim_bulk_alt1(FL2000(dev=device, configure=False)) == 0
+    assert calls == [(0, 1)]
+
+
+def test_unavailable_streaming_interface_does_not_change_alternates(monkeypatch):
+    import types
+
+    calls = []
+    device = types.SimpleNamespace(
+        speed=4,
+        get_active_configuration=lambda: [_SinglePacketBulkAlt()],
+        set_interface_altsetting=lambda i, alt: calls.append(("alt", i, alt)),
+        clear_halt=lambda ep: calls.append(("clear", ep)),
+    )
+
+    def claim(dev, interface):
+        calls.append(("claim", interface))
+        if interface == 1:
+            raise hdmi.usb.core.USBError("streaming interface busy")
+
+    monkeypatch.setattr(hdmi.sys, "platform", "darwin")
+    monkeypatch.setattr(hdmi.usb.util, "claim_interface", claim)
+    assert hdmi._claim_bulk_alt1(FL2000(dev=device, configure=False)) == 1
+    assert calls == [("claim", 0), ("claim", 1)]
