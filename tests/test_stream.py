@@ -1304,3 +1304,34 @@ def test_video_activity_ends_on_normal_exit_interrupt_and_usb_failure(monkeypatc
     result = stream._pace_clone(FL2000(dev=FakeBulkDevice()), bytes(512), MODE_640x480, None, 1)
     assert result == int(isinstance(failure, stream.usb.core.USBError))
     assert ended == [42]
+
+
+@pytest.mark.parametrize("changing", [False, True])
+def test_rle_pump_keeps_raster_cadence_and_eof_even_for_tiny_frames(monkeypatch, changing):
+    """Tiny frames must neither run at raw 63 Hz nor skip EOF when cached."""
+    from fl2000_re.video_modes import MODE_1024x768, pll_pixel_clock
+    from fl2000_re.wire_codec import Rle24Encoder
+
+    clock = [100.0]
+    monkeypatch.setattr(stream.time, "monotonic", lambda: clock[0])
+    monkeypatch.setattr(stream.time, "sleep", lambda delay: clock.__setitem__(0, clock[0] + delay))
+    monkeypatch.setattr(stream, "_raise_if_woke", lambda wall, up: (wall, up))
+    capture = TickingCapture()
+    frames = [bytes(1572864), b"\xff" * 1572864]
+    index = [0]
+
+    def snapshot():
+        index[0] += 1
+        return frames[index[0] % 2 if changing else 0]
+
+    capture.snapshot = snapshot
+    fl = FL2000(dev=FakeBulkDevice())
+    fl.wire_encoder = Rle24Encoder(1024 * 768)
+    sent = stream._pump_paced_frames(fl, capture, MODE_1024x768, 10.0, 100.0, "estendendo", False)
+    raster_hz = pll_pixel_clock(MODE_1024x768.pll) / (1344 * 806)
+    assert raster_hz * 10 <= sent < raster_hz * 10 + 1
+    assert len(fl.dev.packets) == sent * 2
+    assert all(len(packet) == 8 for packet in fl.dev.packets[::2])
+    assert all(packet == b"" for packet in fl.dev.packets[1::2])
+    if changing:
+        assert fl.dev.packets[0] != fl.dev.packets[2]

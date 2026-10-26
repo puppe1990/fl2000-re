@@ -137,3 +137,25 @@ def test_compression_telemetry_is_bounded_and_reports_actual_wire_size(capsys):
     assert [event["frame"] for event in events] == [1, 601]
     assert all(event["wire_bytes"] == 8 for event in events)
     assert all(event["source_bytes"] == 1572864 for event in events)
+
+
+@pytest.mark.parametrize("failed_phase", ["pixels", "eof"])
+def test_compressed_transfer_failure_stops_without_retry_or_spurious_eof(failed_phase):
+    import usb.core
+
+    packets = []
+
+    def write(endpoint, payload, timeout):
+        packets.append(payload)
+        if failed_phase == "pixels":
+            return len(payload) - 1
+        if not payload:
+            raise usb.core.USBTimeoutError("EOF timeout")
+        return len(payload)
+
+    fl = FL2000(dev=types.SimpleNamespace(write=write), configure=False)
+    fl.wire_encoder = codec.Rle24Encoder(1024 * 768)
+    with pytest.raises(usb.core.USBError):
+        bulk_transfer.send_frame(fl, bytes(1572864))
+    assert len(packets) == (1 if failed_phase == "pixels" else 2)
+    assert len(packets[0]) == 8
