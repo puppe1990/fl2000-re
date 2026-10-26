@@ -130,3 +130,10 @@ feeder environment. This disables the separate EP0/I2C polling process and logs
 enabled. Reading bridge status still writes the chip I2C command register, so an isolated process
 does not guarantee zero effect on the device. This switch is a diagnostic control, not a confirmed
 repair for USB timeouts.
+
+Capture counters and approximate timing/idle values have a single writer and use shared raw scalars.
+Reading them in the USB loop never waits for a capture-process lock. Complete pixel publication
+still uses the separate nonblocking frame lock: if the writer is busy or suspended, the feeder
+repeats its last complete frame. Telemetry is approximate and does not synchronize pixel ownership.
+This removes one software starvation path; physical USB timeouts still require long-running hardware
+validation.

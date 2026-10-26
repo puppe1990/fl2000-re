@@ -50,9 +50,12 @@ class CaptureProcess:
         self.snapshot_fresh = False
         self.frame_at = 0.0
         self.metrics = SharedCaptureMetrics()
-        self.counter = mp.Value("i", 1)
-        self.grab_ms = mp.Value("d", 0.0)
-        self.idle = mp.Value("i", 0)
+        # Single-writer telemetry must never acquire a lock in the USB reader.
+        # A descheduled/dead capture child can hold a synchronized Value lock;
+        # even has_frame()/watchdog reads would then starve the hardware feeder.
+        self.counter = mp.RawValue("i", 1)
+        self.grab_ms = mp.RawValue("d", 0.0)
+        self.idle = mp.RawValue("i", 0)
         self.stop = mp.Event()
         self.proc = None
         self._baseline = self.counter.value
