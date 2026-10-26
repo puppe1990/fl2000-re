@@ -137,3 +137,11 @@ still uses the separate nonblocking frame lock: if the writer is busy or suspend
 repeats its last complete frame. Telemetry is approximate and does not synchronize pixel ownership.
 This removes one software starvation path; physical USB timeouts still require long-running hardware
 validation.
+
+On macOS, the USB feeder owns a Foundation activity with user-initiated and latency-critical options
+for the duration of streaming. Thread QoS alone does not opt the process out of App Nap or timer/I/O
+deferral. The activity ends on normal exit, interruption or USB failure; idle system sleep remains
+allowed. A small Objective-C bridge is compiled once into the user cache, outside the frame loop;
+unavailable tooling/API logs a nonfatal event. This follows
+[Apple's activity guidance](https://developer.apple.com/documentation/foundation/processinfo) and
+does not guarantee that a physical USB endpoint will remain responsive.

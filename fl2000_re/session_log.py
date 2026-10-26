@@ -25,10 +25,8 @@ def source_fingerprint(root: Path) -> str:
     Example: source_fingerprint(repo_root) differs after a Python runtime edit.
     """
     paths = sorted((root / "fl2000_re").glob("*.py"))
-    paths += [
-        root / "native" / "hagibis_virtual_display.m",
-        root / "native" / "hagibis_virtual_display",
-    ]
+    paths += sorted((root / "native").glob("*.m"))
+    paths += [root / "native" / "hagibis_virtual_display"]
     digest = hashlib.sha256()
     for path in paths:
         if path.is_file():

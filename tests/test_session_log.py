@@ -80,3 +80,13 @@ def test_first_frame_and_live_capture_delivery_are_logged_once(capsys):
 def test_frame_logging_skips_unidentified_test_or_legacy_captures(capsys):
     sessions.record_frame_ready(types.SimpleNamespace(), 1, 0.02)
     assert capsys.readouterr().out == ""
+
+
+def test_source_hash_tracks_native_activity_bridge(tmp_path):
+    native = tmp_path / "native"
+    native.mkdir()
+    bridge = native / "video_activity.m"
+    bridge.write_text("begin first activity")
+    first = sessions.source_fingerprint(tmp_path)
+    bridge.write_text("begin changed activity")
+    assert sessions.source_fingerprint(tmp_path) != first
