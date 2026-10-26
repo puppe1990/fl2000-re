@@ -176,3 +176,17 @@ def test_disabled_observer_never_starts_control_traffic(monkeypatch, capsys):
     assert watch.start_link_watch(Device(), "run", 60, forbidden_factory) is None
     event = json.loads(capsys.readouterr().out)
     assert event == {"event": "hdmi_link_watch_disabled", "run_id": "run"}
+
+
+def test_saturated_counter_is_unknown_not_a_false_scanout_stop(capsys):
+    trace = watch.LinkTrace("long-session", 60)
+    trace.record(reading(frame=65535, now=1))
+    trace.record(reading(frame=65535, now=2))
+    event = json.loads(capsys.readouterr().out.splitlines()[-1])
+    assert event["scanout_counter_saturated"] is True
+    assert event["scanout_fps"] is None
+    assert event["scanout_running"] is None
+    trace.record(reading(frame=60, now=3))
+    event = json.loads(capsys.readouterr().out.splitlines()[-1])
+    assert event["scanout_counter_saturated"] is False
+    assert event["scanout_running"] is True

@@ -132,3 +132,15 @@ def test_installed_listener_is_persistent_and_has_no_usb_capture_command(tmp_pat
     assert config["KeepAlive"] and config["RunAtLoad"]
     assert config["ProgramArguments"] == ["/python", "-u", "-m", "fl2000_re.fault_listener"]
     assert config["WorkingDirectory"] == str(tmp_path)
+
+
+def test_fault_bundle_keeps_compression_size_and_resets_it_for_new_run():
+    context = listener.FaultContext()
+    context.consume(line({"event": "stream_session_start", "run_id": "first"}))
+    context.consume(
+        line({"event": "usb_wire_compression", "wire_bytes": 849396, "encoder_backend": "native"})
+    )
+    fault = context.consume(line({"event": "usb_transfer_error"}))
+    assert fault["wire_compression"]["wire_bytes"] == 849396
+    context.consume(line({"event": "stream_session_start", "run_id": "second"}))
+    assert context.consume(line({"event": "usb_transfer_error"}))["wire_compression"] == {}

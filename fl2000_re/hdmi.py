@@ -17,6 +17,7 @@ from fl2000_re.it66121 import (
     ite_enable_video,
     ite_send_avi_infoframe,
 )
+from fl2000_re.native_frame import prepare_native_frame_sender
 from fl2000_re.probe import cmd_detect
 from fl2000_re.registers import (
     BULK_EP,
@@ -122,6 +123,7 @@ def _claim_bulk_alt1(fl: FL2000) -> int:
         return 1
     with contextlib.suppress(usb.core.USBError):
         fl.dev.clear_halt(BULK_EP)
+    prepare_native_frame_sender(fl)
     return 0
 
 
@@ -134,6 +136,7 @@ def _select_video_bulk_alt(fl: FL2000) -> None:
     # Remove duplicate EP1 so PyUSB selects only the chosen streaming route.
     fl.dev.set_interface_altsetting(0, 0)
     fl.dev.set_interface_altsetting(1, alternate)
+    fl.bulk_burst_packets = 1 if alternate else 16
     print(
         f"  USB bulk: interface 1 alt {alternate}, rajada maxima de {1 if alternate else 16} pacote(s)."
     )

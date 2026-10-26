@@ -80,6 +80,7 @@ class FaultContext:
 
     def __init__(self) -> None:
         self.session: dict[str, object] = {}
+        self.wire: dict[str, object] = {}
         self.links: deque[dict[str, object]] = deque(maxlen=20)
         self.stats: deque[str] = deque(maxlen=8)
 
@@ -106,8 +107,11 @@ class FaultContext:
             return None
         if kind == "stream_session_start":
             self.session = event
+            self.wire = {}
             self.links.clear()
             self.stats.clear()
+        if kind == "usb_wire_compression":
+            self.wire = event
         if kind == "hdmi_link_state":
             self.links.append(event)
         if kind not in FAULT_EVENTS:
@@ -118,6 +122,7 @@ class FaultContext:
             "fault_at": line[1:20],
             "fault": event,
             "session": self.session,
+            "wire_compression": self.wire,
             "link_states": list(self.links),
             "recent_stats": list(self.stats),
         }

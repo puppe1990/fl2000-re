@@ -64,7 +64,8 @@ class LinkTrace:
     def record(self, reading: dict[str, object]) -> None:
         now = float(reading["sampled_at"])
         fps = self._scanout_fps(reading)
-        running = fps is None or fps >= self.target_fps * 0.5
+        saturated = self._counter_saturated(reading)
+        running = None if saturated else fps is None or fps >= self.target_fps * 0.5
         signature = (*[reading[k] for k in ("flags", "pll", "ite_status")], running)
         changed = signature != self.signature
         self.previous, self.signature = reading, signature
@@ -79,6 +80,7 @@ class LinkTrace:
                     "run_id": self.run_id,
                     "changed": changed,
                     "scanout_fps": fps,
+                    "scanout_counter_saturated": saturated,
                     "scanout_running": running,
                     **values,
                 }
@@ -87,11 +89,18 @@ class LinkTrace:
         )
 
     def _scanout_fps(self, reading: dict[str, object]) -> float | None:
-        if self.previous is None:
+        if self.previous is None or self._counter_saturated(reading):
             return None
         elapsed = float(reading["sampled_at"]) - float(self.previous["sampled_at"])
         delta = (int(reading["frame"]) - int(self.previous["frame"])) & 0xFFFF
         return round(delta / elapsed, 2) if elapsed > 0 else None
+
+    def _counter_saturated(self, reading: dict[str, object]) -> bool:
+        return bool(
+            self.previous is not None
+            and self.previous["frame"] == 65535
+            and reading["frame"] == 65535
+        )
 
 
 def _watch_link(run_id: str, bus: int, address: int, stop: Event, target_fps: int) -> None:

@@ -208,3 +208,14 @@ requires this even when the final pixels form a run. A repeat-count token may ro
 software decoder yet still violate the hardware protocol. The regression suite independently checks
 this final-token constraint for both codecs, including one/two-pixel tails and long runs. A uniform
 XGA frame therefore uses 12 bytes (literal, count, final literal and padding), rather than 8.
+
+The explicit local `usb-native-sync` profile (`0` by default, `1` to opt in) uses one C call for
+consecutive synchronous pixel and EOF transfers through the already loaded libusb handle. It checks
+complete pixels before emitting EOF and never retries a failed/partial transfer. For this experiment
+set queue depth to zero; queued transport otherwise takes precedence. This removes interpreter
+scheduling/copying between phases but does not guarantee a responsive device.
+
+Session records identify actual transport, queue depth and selected burst size. Fault bundles retain
+the latest compression size/backend. A saturated 16-bit scanout counter reports unknown scanout
+rate/running state rather than a false zero-frame-rate outage; bridge stability remains
+independently observed.
