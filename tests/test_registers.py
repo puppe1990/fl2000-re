@@ -63,3 +63,8 @@ def test_dump_regs_covers_usb_and_vga_window():
 
 def test_bulk_endpoint_is_out_ep1():
     assert registers.BULK_EP == 0x01
+
+
+def test_aclk_line_buffer_reset_and_eof_bits():
+    assert registers.ACLK_LBUF_SW_RST_BIT == 20
+    assert registers.ACLK_EOF_ZLP_BIT == 28

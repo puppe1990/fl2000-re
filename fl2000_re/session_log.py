@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Protocol
 
 from fl2000_re.fl2000_usb import FL2000
+from fl2000_re.usb_runtime import usb_library_version
 from fl2000_re.video_modes import VideoMode
 
 
@@ -84,11 +85,13 @@ def start_stream_session(
                 "capture_fps": capture_fps,
                 "display_id": display_id,
                 "usb_transport": _transport_name(fl),
+                "libusb_version": usb_library_version(fl.dev),
                 "usb_queue_depth": getattr(getattr(fl, "frame_transport", None), "depth", 0),
                 "usb_burst_packets": getattr(fl, "bulk_burst_packets", None),
                 "usb_speed": getattr(fl.dev, "speed", None),
                 "usb_bus": getattr(fl.dev, "bus", None),
                 "usb_address": getattr(fl.dev, "address", None),
+                "usb_port_path": list(getattr(fl.dev, "port_numbers", None) or []),
             }
         ),
         flush=True,

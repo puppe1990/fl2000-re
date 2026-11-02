@@ -39,7 +39,7 @@ def test_revision_handles_missing_git_and_timeouts(monkeypatch):
 def test_session_reports_effective_usb_profile_and_link(monkeypatch, capsys):
     monkeypatch.setattr(sessions, "git_revision", lambda root: "abc123")
     monkeypatch.setattr(sessions, "source_fingerprint", lambda root: "fingerprint")
-    device = types.SimpleNamespace(speed=4, bus=1, address=7)
+    device = types.SimpleNamespace(speed=4, bus=1, address=7, port_numbers=(2, 3))
     run_id = sessions.start_stream_session(types.SimpleNamespace(dev=device), MODE_1024x768, 18, 20)
     sessions.end_stream_session(run_id, 1, 42, 1.2345)
     start, end = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
@@ -48,6 +48,7 @@ def test_session_reports_effective_usb_profile_and_link(monkeypatch, capsys):
     assert start["bulk_block_bytes"] == 1572864
     assert start["frame_bytes"] == 1572864
     assert start["usb_speed"] == 4
+    assert start["usb_port_path"] == [2, 3]
     assert start["hdmi"] == [1024, 768, 60]
     assert start["run_id"] == end["run_id"] == run_id
     assert end["sent_frames"] == 42

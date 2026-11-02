@@ -22,6 +22,8 @@ import usb.core
 from fl2000_re.fl2000_usb import FL2000
 from fl2000_re.registers import BULK_EP
 
+USB_RECOVERY_BUDGET = 8
+
 TransferPointer = ct.POINTER(native._libusb_transfer)
 
 
@@ -48,6 +50,7 @@ class _FrameSlot:
     fresh: bool
     queued_at: float = field(default_factory=time.monotonic)
     transfers: list[TransferPointer] = field(default_factory=list)
+    dma: ct.Array[ct.c_char] | None = None
 
 
 class SyncFrameTransport:
@@ -107,6 +110,8 @@ class PipelineTransport:
 
     def _enqueue(self, frame: bytes, frame_at: float, fresh: bool) -> None:
         slot = _FrameSlot(frame, frame_at, fresh)
+        if frame:
+            slot.dma = (ct.c_char * len(frame)).from_buffer_copy(frame)
         self.slots.append(slot)
         for payload in (frame, b""):
             pointer = self.library.libusb_alloc_transfer(0)
@@ -116,10 +121,11 @@ class PipelineTransport:
             transfer = pointer.contents
             transfer.dev_handle, transfer.endpoint, transfer.type = self.handle, BULK_EP, 2
             transfer.timeout, transfer.length = self.timeout_ms, len(payload)
-            transfer.buffer = ct.cast(ct.c_char_p(payload), ct.c_void_p) if payload else None
+            transfer.buffer = ct.cast(slot.dma, ct.c_void_p) if payload else None
             transfer.callback = self.callback
             code = self.library.libusb_submit_transfer(pointer)
             if code < 0:
+                _report_submit_error(code, len(payload), self.depth)
                 raise usb.core.USBError(f"libusb submit={code}; expected 0, no retry")
             self.pending.add(ct.addressof(transfer))
 
@@ -179,6 +185,7 @@ class PipelineTransport:
             self.results.pop(ct.addressof(pointer.contents), None)
             self.library.libusb_free_transfer(pointer)
         slot.transfers.clear()
+        slot.dma = None
 
     def close(self) -> bool:
         if self.closed:
@@ -203,6 +210,52 @@ class PipelineTransport:
         deadline = time.monotonic() + self.timeout_ms / 1000 + 1
         while self.pending:
             self._poll(deadline)
+
+
+def recover_usb_transport(fl: FL2000, sender: Callable[[FL2000, bytes], None]) -> FrameTransport:
+    """Drop a stalled bulk queue, clear halt, and start a new transport.
+
+    Must not pulse ACLK lbuf_sw_rst: that stops live scanout (session 7ae7f7a3bb84).
+    The failed URB is not resubmitted. Example: transport = recover_usb_transport(fl, send_frame)
+    """
+    old = getattr(fl, "frame_transport", None)
+    if old is not None and not old.close():
+        raise usb.core.USBError(
+            "USB queue undrained after timeout; expected cancel to complete. No retry."
+        )
+    with contextlib.suppress(usb.core.USBError, AttributeError):
+        fl.dev.clear_halt(BULK_EP)
+    transport = make_frame_transport(fl, sender)
+    fl.frame_transport = transport
+    print(
+        json.dumps(
+            {
+                "event": "usb_transport_recovered",
+                "queue_depth": getattr(transport, "depth", 0),
+            }
+        ),
+        flush=True,
+    )
+    return transport
+
+
+def _report_submit_error(code: int, expected_bytes: int, depth: int) -> None:
+    # Submit failures have no completion callback; otherwise the fault listener
+    # silently misses device removal and cannot correlate it with the session.
+    print(
+        json.dumps(
+            {
+                "event": "usb_transfer_error",
+                "transport": "pipeline",
+                "phase": "submit",
+                "backend_error_code": code,
+                "expected_bytes": expected_bytes,
+                "sent_bytes": None,
+                "queue_depth": depth,
+            }
+        ),
+        flush=True,
+    )
 
 
 _undrained_transports: list[PipelineTransport] = []

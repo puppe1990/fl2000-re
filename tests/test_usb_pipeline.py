@@ -241,3 +241,89 @@ def test_interface_release_waits_until_queued_buffers_are_drained(monkeypatch):
     fl.frame_transport.close = lambda: True
     pipeline.release_bulk(fl)
     assert calls == [1, 0]
+
+
+def test_queued_slots_own_dma_copy_independent_of_python_bytes():
+    lib = FakeLibrary()
+    sender = pipeline.PipelineTransport(lib, None, None, depth=2)
+    payload = bytes([0x00, 0xAB]) * 256
+    sender.send(payload, 1.0, True)
+    del payload
+    for slot in sender.slots:
+        assert slot.dma is not None
+        assert bytes(slot.dma) == slot.pixels
+        assert slot.dma[:4] == b"\x00\xab\x00\xab"
+    assert sender.close()
+
+
+def test_recover_usb_transport_clears_halt_without_stopping_scanout(monkeypatch):
+    from fl2000_re.registers import REG_ACLK
+
+    class Device:
+        def __init__(self) -> None:
+            self.regs = {REG_ACLK: 1 << 28}
+            self.halted = []
+            self.aclk_writes: list[int] = []
+
+        def set_configuration(self) -> None:
+            return None
+
+        def ctrl_transfer(self, request_type, request, value, index, data, timeout=None):
+            if request == 64:
+                return int(self.regs.get(index, 0)).to_bytes(4, "little")
+            written = int.from_bytes(bytes(data), "little")
+            if index == REG_ACLK:
+                self.aclk_writes.append(written)
+            self.regs[index] = written
+            return len(bytes(data))
+
+        def clear_halt(self, endpoint) -> None:
+            self.halted.append(endpoint)
+
+    class Stalled:
+        def close(self) -> bool:
+            return True
+
+    from fl2000_re.fl2000_usb import FL2000
+
+    replacement = object()
+    monkeypatch.setattr(pipeline, "make_frame_transport", lambda *a, **k: replacement)
+    fl = FL2000(dev=Device())
+    fl.frame_transport = Stalled()
+    transport = pipeline.recover_usb_transport(fl, lambda *_: None)
+    assert transport is replacement is fl.frame_transport
+    assert fl.dev.halted == [1]
+    assert fl.dev.aclk_writes == []
+    assert fl.dev.regs[REG_ACLK] == 1 << 28
+
+
+def test_recover_aborts_when_stalled_queue_cannot_drain(monkeypatch):
+    class Stuck:
+        def close(self) -> bool:
+            return False
+
+    monkeypatch.setattr(pipeline, "make_frame_transport", lambda *a, **k: pytest.fail("new queue"))
+    fl = types.SimpleNamespace(
+        dev=types.SimpleNamespace(clear_halt=lambda *_: None), frame_transport=Stuck()
+    )
+    with pytest.raises(usb.core.USBError, match="undrained"):
+        pipeline.recover_usb_transport(fl, lambda *_: None)
+
+
+def test_submit_failure_is_visible_to_fault_listener_without_callback_or_retry(capsys):
+    lib = FakeLibrary(fail_submit=1)
+    sender = pipeline.PipelineTransport(lib, None, None, depth=2)
+    with pytest.raises(usb.core.USBError):
+        sender.send(b"pixels", 1, True)
+    event = json.loads(capsys.readouterr().out)
+    assert event == {
+        "event": "usb_transfer_error",
+        "transport": "pipeline",
+        "phase": "submit",
+        "backend_error_code": -1,
+        "expected_bytes": 6,
+        "sent_bytes": None,
+        "queue_depth": 2,
+    }
+    assert lib.submit_count == 1 and not lib.inflight
+    assert sender.close()
