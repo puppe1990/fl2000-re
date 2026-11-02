@@ -57,6 +57,14 @@ def test_program_mode_keeps_eof_zlp_bit_and_pll():
     assert fl.dev.regs[REG_PLL] == MODE_640x480.pll
 
 
+def test_reset_line_buffer_pulses_sw_rst_and_keeps_eof_zlp():
+    fl = _fake_fl()
+    fl.dev.regs[REG_ACLK] = 1 << 28
+    hdmi.reset_line_buffer(fl)
+    assert fl.dev.regs[REG_ACLK] & (1 << 28)
+    assert not (fl.dev.regs[REG_ACLK] & (1 << 20))
+
+
 def test_bring_up_hdmi_forwards_v_shift(monkeypatch):
     fl = _fake_fl()
     monkeypatch.setattr(hdmi, "cmd_detect", lambda _fl: 0)

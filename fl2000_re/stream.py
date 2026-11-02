@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import time
 
 import usb.core
@@ -55,12 +54,19 @@ from fl2000_re.link_watch import start_link_watch, stop_link_watch
 from fl2000_re.mac_activity import begin_video_activity
 from fl2000_re.pixels import dword_swap_frame, make_bars_rgb565, pack_frame
 from fl2000_re.session_log import end_stream_session, record_frame_ready, start_stream_session
+from fl2000_re.sleep_clock import SystemWakeError, raise_if_woke
 from fl2000_re.sleep_clock import read_sleep_clocks as _read_clocks
 from fl2000_re.stream_metrics import PumpMetrics
 from fl2000_re.stream_metrics import _maybe_print_stats as _maybe_print_stats
 from fl2000_re.stream_metrics import format_stream_stats as format_stream_stats
 from fl2000_re.thread_priority import prioritize_usb_thread
-from fl2000_re.usb_pipeline import SyncFrameTransport, make_frame_transport, release_bulk
+from fl2000_re.usb_pipeline import (
+    USB_RECOVERY_BUDGET,
+    SyncFrameTransport,
+    make_frame_transport,
+    recover_usb_transport,
+    release_bulk,
+)
 from fl2000_re.video_modes import MODE_640x480, VideoMode, default_mirror_mode, needs_usb3
 from fl2000_re.wire_codec import rle_frame_period_s
 
@@ -69,35 +75,20 @@ USB3_LINK_SPEED = 4
 # USB still pumps 60 Hz by resending the last frame. Grabbing ~69 fps via
 # CGWindowListCreateImage is what pinned WindowServer on the 8 GB Air
 # (2026-10-20: grab 636-2735 ms, then four btn_rst freezes).
-WAKE_GAP_S = 3.0
 CAPTURE_STALL_S = 5.0
 CAPTURE_START_S = 20.0
 PREVIEW_ATTEMPTS = 2
 PREVIEW_RETRY_S = 0.3
 
 
-class SystemWakeError(RuntimeError):
-    """macOS slept; FL2000/IT66121 HDMI is gone but this process is still alive."""
-
-
 class CaptureDeadError(RuntimeError):
     """Capture child died/wedged and the restart budget is spent; exit to relaunch."""
 
 
-def wall_minus_uptime_gap(
-    wall_now: float, uptime_now: float, wall_prev: float, uptime_prev: float
-) -> float:
-    """Elapsed continuous clock minus awake uptime; retained name for compatibility.
-
-    Inputs must be monotonic clock samples, never time.time() (NTP can step it).
-
-    Example: wall_minus_uptime_gap(130, 50.2, 100, 50) == 29.8
-    """
-    return (wall_now - wall_prev) - (uptime_now - uptime_prev)
-
-
-def woke_from_sleep(gap_s: float, threshold_s: float = WAKE_GAP_S) -> bool:
-    return gap_s >= threshold_s
+def _raise_if_woke(
+    wall_prev: float | None, up_prev: float | None
+) -> tuple[float | None, float | None]:
+    return raise_if_woke(wall_prev, up_prev, clocks=_read_clocks)
 
 
 def link_warning(usb_speed: int | None, mode: VideoMode) -> str | None:
@@ -368,6 +359,7 @@ def _pump_paced_frames(
         else usb_feed_period_s(mode.freq)
     )
     transport = getattr(fl, "frame_transport", None) or SyncFrameTransport(fl, send_frame)
+    recoveries = 0
     next_tick = t0
     last_log, last_sent = t0, 0
     stat_cap = capture.counter.value
@@ -391,9 +383,21 @@ def _pump_paced_frames(
             )
         frame = capture.snapshot()
         usb_start = time.monotonic()
-        delivered = transport.send(
-            frame, getattr(capture, "frame_at", 0.0), getattr(capture, "snapshot_fresh", True)
-        )
+        try:
+            delivered = transport.send(
+                frame, getattr(capture, "frame_at", 0.0), getattr(capture, "snapshot_fresh", True)
+            )
+        except usb.core.USBError as exc:
+            if recoveries >= USB_RECOVERY_BUDGET:
+                raise
+            recoveries += 1
+            print(
+                f"  bulk erro, recuperando {recoveries}/{USB_RECOVERY_BUDGET}: {exc}",
+                flush=True,
+            )
+            transport = recover_usb_transport(fl, send_frame)
+            continue
+        recoveries = 0  # budget is consecutive; a good frame must not spend later timeouts
         sent += 1
         capture.sent_frames = sent
         now = time.monotonic()
@@ -444,33 +448,6 @@ def _ensure_capture(
         print("  sem captura e sem tentativas de reinicio. Saindo para religar.", flush=True)
         return False, last_cap, last_progress
     return True, capture.counter.value, now
-
-
-def _raise_if_woke(
-    wall_prev: float | None, up_prev: float | None
-) -> tuple[float | None, float | None]:
-    continuous, awake = _read_clocks()
-    if continuous is None or awake is None:
-        return wall_prev, up_prev
-    if wall_prev is None or up_prev is None:
-        return continuous, awake
-    gap = wall_minus_uptime_gap(continuous, awake, wall_prev, up_prev)
-    if woke_from_sleep(gap):
-        print(
-            json.dumps(
-                {
-                    "event": "system_wake_detected",
-                    "sleep_gap_s": round(gap, 3),
-                    "clock_source": "monotonic_raw_minus_uptime_raw",
-                }
-            ),
-            flush=True,
-        )
-        raise SystemWakeError(
-            "macOS saiu do descanso. O FL2000 perde o HDMI no sleep; "
-            "saindo para o LaunchAgent religar (ou rode ./bin/extend)."
-        )
-    return continuous, awake
 
 
 def _capture_parked(capture) -> bool:

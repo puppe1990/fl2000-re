@@ -122,6 +122,8 @@ def test_kernel_lookup_filters_target_and_discards_unrelated_fields(monkeypatch)
     rows = listener.kernel_fault_events("2026-10-26 15:42:08", 2)
     assert rows == [{key: payload[key] for key in ("timestamp", "messageType", "eventMessage")}]
     assert "device 2 (" in seen[0][0][-1]
+    assert "AppleUSBXHCI" in seen[0][0][-1]
+    assert "IOUSBHostPort" in seen[0][0][-1]
     assert seen[0][1]["timeout"] == 10
 
 

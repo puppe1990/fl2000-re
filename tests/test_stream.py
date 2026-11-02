@@ -12,6 +12,7 @@ import pytest
 from fl2000_re.fl2000_usb import FL2000
 from fl2000_re.registers import BULK_EP
 from fl2000_re.stream import capture_period_s, frame_period_s, send_frame
+from fl2000_re.usb_pipeline import DeliveredFrame
 from fl2000_re.video_modes import MODE_640x480, MODE_1024x768
 
 
@@ -969,7 +970,7 @@ def test_cmd_mirror_survives_hung_preview(monkeypatch, tmp_path):
 
 
 def test_wall_minus_uptime_gap_is_sleep_duration():
-    from fl2000_re.stream import wall_minus_uptime_gap, woke_from_sleep
+    from fl2000_re.sleep_clock import wall_minus_uptime_gap, woke_from_sleep
 
     gap = wall_minus_uptime_gap(130.0, 50.2, 100.0, 50.0)
     assert gap == pytest.approx(29.8)
@@ -1283,6 +1284,88 @@ def test_agent_startup_does_not_wait_for_synchronous_preview(monkeypatch, tmp_pa
     assert "preview_id" not in seen
     assert not (tmp_path / "preview.png").exists()
     assert seen["brought_up"]
+
+
+def test_pump_recovers_from_one_usb_timeout_and_keeps_streaming(monkeypatch):
+    class FlakyTransport:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def send(self, frame, frame_at, fresh):
+            self.calls += 1
+            if self.calls == 2:
+                raise stream.usb.core.USBError("timeout")
+            return DeliveredFrame(frame_at, fresh)
+
+        def close(self) -> bool:
+            return True
+
+    recoveries = []
+    transport = FlakyTransport()
+    monkeypatch.setattr(
+        stream, "recover_usb_transport", lambda fl, sender: recoveries.append(1) or transport
+    )
+    fl = FL2000(dev=FakeBulkDevice())
+    fl.frame_transport = transport
+    sent = stream._pump_paced_frames(
+        fl, TickingCapture(), MODE_640x480, 0.05, time.monotonic(), "estendendo", False
+    )
+    assert recoveries == [1]
+    assert sent >= 3
+    assert transport.calls >= 4
+
+
+def test_pump_gives_up_after_usb_recovery_budget(monkeypatch):
+    class DeadTransport:
+        def send(self, frame, frame_at, fresh):
+            raise stream.usb.core.USBError("timeout")
+
+        def close(self) -> bool:
+            return True
+
+    recoveries = []
+    monkeypatch.setattr(stream, "USB_RECOVERY_BUDGET", 2)
+    monkeypatch.setattr(
+        stream,
+        "recover_usb_transport",
+        lambda fl, sender: recoveries.append(1) or fl.frame_transport,
+    )
+    fl = FL2000(dev=FakeBulkDevice())
+    fl.frame_transport = DeadTransport()
+    with pytest.raises(stream.usb.core.USBError, match="timeout"):
+        stream._pump_paced_frames(
+            fl, TickingCapture(), MODE_640x480, 0.2, time.monotonic(), "estendendo", False
+        )
+    assert recoveries == [1, 1]
+
+
+def test_pump_resets_usb_recovery_budget_after_a_successful_frame(monkeypatch):
+    class FlakyTransport:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def send(self, frame, frame_at, fresh):
+            self.calls += 1
+            if self.calls in (2, 4):
+                raise stream.usb.core.USBError("timeout")
+            return DeliveredFrame(frame_at, fresh)
+
+        def close(self) -> bool:
+            return True
+
+    recoveries = []
+    transport = FlakyTransport()
+    monkeypatch.setattr(stream, "USB_RECOVERY_BUDGET", 1)
+    monkeypatch.setattr(
+        stream, "recover_usb_transport", lambda fl, sender: recoveries.append(1) or transport
+    )
+    fl = FL2000(dev=FakeBulkDevice())
+    fl.frame_transport = transport
+    sent = stream._pump_paced_frames(
+        fl, TickingCapture(), MODE_640x480, 0.12, time.monotonic(), "estendendo", False
+    )
+    assert recoveries == [1, 1]
+    assert sent >= 3
 
 
 @pytest.mark.parametrize("failure", [None, KeyboardInterrupt(), stream.usb.core.USBError("forced")])

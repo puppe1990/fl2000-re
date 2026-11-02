@@ -140,9 +140,16 @@ def kernel_fault_events(fault_at: str, address: object = None) -> list[dict[str,
     Example: kernel_fault_events("2026-10-26 15:42:08", 2)
     """
     at = datetime.strptime(fault_at, "%Y-%m-%d %H:%M:%S")
-    predicate = 'process == "kernel" AND eventMessage CONTAINS[c] "endpoint 0x01"'
+    endpoint = 'eventMessage CONTAINS[c] "endpoint 0x01"'
     if isinstance(address, int):
-        predicate += f' AND eventMessage CONTAINS[c] "device {address} ("'
+        endpoint += f' AND eventMessage CONTAINS[c] "device {address} ("'
+    # Port/controller events may precede an endpoint timeout. Keep this context
+    # distinct from proof of a cause: it can also concern other USB devices.
+    predicate = (
+        f'process == "kernel" AND (({endpoint}) OR '
+        'eventMessage CONTAINS[c] "AppleUSBXHCI" OR '
+        'eventMessage CONTAINS[c] "IOUSBHostPort")'
+    )
     result = subprocess.run(
         [
             "/usr/bin/log",

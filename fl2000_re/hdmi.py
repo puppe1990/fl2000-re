@@ -19,6 +19,8 @@ from fl2000_re.it66121 import (
 )
 from fl2000_re.probe import cmd_detect
 from fl2000_re.registers import (
+    ACLK_EOF_ZLP_BIT,
+    ACLK_LBUF_SW_RST_BIT,
     BULK_EP,
     REG_ACLK,
     REG_CTRL3,
@@ -78,7 +80,7 @@ def _program_fl2000_mode_registers(fl: FL2000, mode: VideoMode, v_shift: int = 0
         print(f"  PLL readback mismatch: 0x{fl.reg_read(REG_PLL):08X}")
     for bit in (22, 24, 19, 21, 13, 27, 28, 29):
         fl.bit_clear(REG_ACLK, bit)
-    fl.bit_set(REG_ACLK, 28)  # EOF = ZLP; required or bulk NAKs forever
+    fl.bit_set(REG_ACLK, ACLK_EOF_ZLP_BIT)  # EOF = ZLP; required or bulk NAKs forever
     for bit in (28, 6, 31, 24, 25, 26, 27):
         fl.bit_clear(REG_PXCLK, bit)
     fl.bit_set(REG_PXCLK, 0)
@@ -100,6 +102,17 @@ def _program_fl2000_mode_registers(fl: FL2000, mode: VideoMode, v_shift: int = 0
     fl.bit_clear(REG_CTRL3, 10)
     fmt = "RGB332" if mode.bpp == 1 else "RGB565"
     print(f"  FL2000 mode {mode.width}x{mode.height} {fmt} programado")
+
+
+def reset_line_buffer(fl: FL2000) -> None:
+    """Pulse the chip line-buffer reset without dropping the ZLP EOF mode.
+
+    Do not call this during a live USB recover: lbuf_sw_rst stops scanout.
+    Example: reset_line_buffer(fl) after programming mode registers, before the first frames.
+    """
+    fl.bit_set(REG_ACLK, ACLK_LBUF_SW_RST_BIT)
+    fl.bit_clear(REG_ACLK, ACLK_LBUF_SW_RST_BIT)
+    fl.bit_set(REG_ACLK, ACLK_EOF_ZLP_BIT)
 
 
 def _enable_ite_video(ite: IT66121, mode: VideoMode) -> None:

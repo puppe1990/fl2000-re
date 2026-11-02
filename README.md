@@ -224,3 +224,38 @@ low-contrast changes, reducing repeated switches to the slower text scaler durin
 Cursor-sized changes and low-amplitude noise still do not trigger motion. A still image returns to
 the original sharp text filter once the hold expires; output resolution and exact RGB565 wire
 encoding stay unchanged.
+
+## Monitor contínuo do monitor
+
+`python -m fl2000_re.health_monitor` acompanha entrega USB, estabilidade do transmissor HDMI e os
+serviços `extend` e `usb-listener`, sem abrir USB. O LaunchAgent `com.fl2000-re.health-monitor`
+mantém esse acompanhamento no login. `monitor_plist(repo, logs)` gera sua configuração.
+
+- Status atual: `~/Library/Logs/fl2000-re-health.json`, atualizado a cada 5s.
+- Histórico de mudanças: `fl2000-re-health-history.jsonl`, com rotação de 2 MiB.
+- Evidências de falhas: `fl2000-re-faults.jsonl`.
+- Experimentos e relatos visuais: `fl2000-re-experiments.jsonl`.
+
+Depois de 30s sem amostra, entrega/transmissor passam a sem sinal/desconhecido.
+`assessment=queda_recente` permanece por dez minutos após erro USB ou perda HDMI, inclusive após
+reiniciar o vídeo. Contadores incluem o histórico disponível no log; não são um total vitalício.
+Entrega USB ou processo vivo não confirmam imagem estável depois do adaptador HDMI→VGA. O supervisor
+não reinicia o vídeo por uma piscada nem modifica perfis automaticamente.
+
+### Perfil físico — 29/10
+
+A fluidez foi aprovada com **1024×768@60**, virtual **1280×960**, pixels **raw**, fila **2**, rajada
+**burst16** e observador HDMI ligado. Esse perfil foi preservado, mas **os timeouts continuam**:
+após reconexão física, houve falha em 376,157s. A próxima verificação física é mover a conexão USB
+para outra porta do Mac, mantendo o caminho HDMI/VGA. Detalhes e sessões fixas estão em
+`HANDOFF.md`.
+
+Os testes de 50 Hz, entrada RGB24 alternativa, libusb 1.0.30 e blocos de 256 KiB em fila também
+falharam. Seus overrides foram removidos. A libusb global segue 1.0.29; nenhuma instalação global
+foi substituída. O build isolado 1.0.30 permanece no cache apenas como artefato do teste, sem uso
+pelo serviço.
+
+Cada sessão registra agora `libusb_version` efetiva e `usb_port_path`. Falhas na submissão libusb
+também geram evento estruturado, sem aguardar callback. A coleta do kernel inclui contexto do
+controlador/porta; esses eventos podem ser de outros dispositivos e não estabelecem automaticamente
+a causa da queda.

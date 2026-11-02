@@ -66,6 +66,13 @@ tests/test_<module>.py    mirrors the package
 
 ## Hardware caveats (do not "simplify" these away)
 
+- Active physical profile (2026-10-29): `1024x768` at 60 Hz, virtual 1280x960, raw wire pixels,
+  queue depth 2, burst16, HDMI observer enabled. User reported excellent output with this exact
+  combination. Preserve its fluency, but repeated USB timeouts remain confirmed. Do not restore the
+  prior RLE/queue4 profile or the 50 Hz experiment (which worsened bridge stability).
+- USB delivery and a live process do not establish visible monitor stability. Keep physical user
+  reports distinct from measured bridge/USB evidence.
+
 - Default clone/extend HDMI is 720x480 RGB565 @ 60 Hz (CEA 480p 16:9). 640x480 4:3 is stretched on
   the Dell 16:9. 720p RGB565 overruns USB 2.0. 800x600 RGB332 never locked.
 - USB 3 changes the ceiling: 1440x900/1080p timings from Fresco's `big_table_16bit_r0` lock and
@@ -108,6 +115,11 @@ tests/test_<module>.py    mirrors the package
 
 - Timeouts for USB EP0 (2s), bulk (2s), I2C (20 polls).
 - Do not add retries on bulk NAK — tell the user to unplug/replug.
+- After a bulk timeout the pump may clear_halt and open a new queue (`usb_transport_recovered`)
+  without resubmitting the failed URB. Must not pulse ACLK lbuf_sw_rst during that recover: it stops
+  live scanout (session 7ae7f7a3bb84, 2026-11-01). Recovery budget is consecutive: a successful
+  frame resets it. If cancel does not drain, or eight timeouts in a row, exit and let the
+  LaunchAgent restart.
 - Do not walk CoreGraphics CF arrays (display/mode enumeration) through raw `ctypes`:
   `CFArrayGetCount` segfaults Python on a stale pointer (2026-09-19). Use the ObjC helper or
   `system_profiler`. Run diagnostics with `python -u` so a crash still flushes the output.

@@ -1,6 +1,103 @@
 # Handoff — fl2000-re
 
-## Estado atual — 2026-10-26 (prioridade sobre os perfis históricos abaixo)
+## Investigação — 01/11
+
+- Sessões do LaunchAgent morriam a cada ~2 min (mediana 113s no log atual) com o mesmo padrão: ITE
+  `video_stable=false` (`ite_status=0x0C`) com scanout ~60 fps, depois timeout USB de ~2,2s em URB
+  de 1.572.864 bytes (status 2, byte count parcial aleatório).
+- Recover in-process (sessão `7ae7f7a3bb84`, hash `0ca28aaa2ba247ba`): o primeiro timeout
+  (521216/1572864) recuperou, mas `lbuf_sw_rst` (ACLK bit 20) zerou scanout (`scanout_fps=0`,
+  `frame=0`). Recoveries 2–8 falharam em ~2,2s com exatamente 147456 bytes (72 linhas RGB565) até o
+  orçamento 8/8. Sessão 86,82s, 3975 frames, rc=1. HDMI flicker costuma voltar antes do USB.
+- Recover agora: cancela a fila, `clear_halt`, nova queue. Sem `lbuf_sw_rst`. Não reenvia o URB
+  falho. DMA continua `c_char` copiado no slot. Helper `reset_line_buffer` permanece, só não entra
+  no recover ao vivo. `make check`: 503 testes.
+- Hardware (sessão `e4a5edcbe982`, hash `a7be5c20fadb64d5`, display 773): recover 1–4/8 (19:31:03
+  207872 B, 19:31:17 242688 B, 19:37:06 337920 B, 19:38:59 1323008 B) mantiveram scanout ~60 e HDMI
+  `0x0C`→`0x1C` em ~1 s. Sem o padrão 147456 / `scanout_fps=0`. O timeout USB em si continua.
+- Orçamento de recover passou a ser consecutivo: um quadro USB bom zera o contador, para timeouts
+  espaçados não matarem o virtual display no 8º. Oito falhas seguidas ainda encerram o pump.
+- Sessão `4004e9fb8ab7` (hash `27331cf80cf0342c`, display 774): ~4 h no ar, 67 recovers todos 1/8,
+  display inalterado. Timeouts USB (~2,2 s, status 2) continuam; o recover sem `lbuf_sw_rst` e o
+  orçamento consecutivo impedem a morte da sessão. USB a 60 fps não prova imagem VGA.
+- Religue controlado com SIGINT no serviço `com.fl2000-re.extend` para carregar o código. Não
+  interpretar recuperação USB como imagem VGA estável.
+
+## Investigação — 31/10
+
+- Acompanhamento ativo confirmou timeouts novos às 13:04:41 (1228800/1572864), 13:05:56
+  (1399808/1572864) e 13:07:11 (446464/1572864), no perfil aprovado.
+- Comparação local com FrescoLogic/FL2000 confirmou configuração de rejeição U1/U2, EOF e formato de
+  pixels coerentes com o driver. Não identificada correção nessa comparação.
+- Teste da rota do driver Linux, IF0/alt1 mantendo raw/fila2/burst16 e resolução: sessões
+  `e9490b3cf267` e `83b37b8e46ce`, falha imediata libusb submit -5 (NOT_FOUND), zero quadros. IF1
+  continuava expondo endpoint duplicado, conforme descritores reais. A rota não é utilizável neste
+  estado do macOS.
+- Override `FL2000_CONTROL_BULK` removido do launchctl e código experimental removido. Perfil
+  anterior restaurado; sessão `ae4f62c46551` voltou a entregar imagem às 13:07:59.
+- A sessão restaurada `ae4f62c46551` também falhou às 13:11:27, após cerca de 208s, com
+  113664/1572864 bytes; kernel confirmou timeout. Serviço retomou com `26fddfa1996c`. Nenhuma
+  estabilidade longa obtida. `make check`: 495 testes, Ruff e Prettier aprovados após remoção do
+  experimento.
+- Registro persistente em `~/Library/Logs/fl2000-re-experiments.jsonl`. Não interpretar o reinício
+  ou a recuperação USB como estabilidade física comprovada.
+
+## Estado atual — 2026-10-29 (prioridade sobre os perfis históricos abaixo)
+
+- **Estabilidade não resolvida.** Preservado o perfil cuja fluidez o usuário aprovou: HDMI
+  **1024×768@60**, virtual **1280×960**, wire **raw**, fila **2**, rajada **burst16** (IF1/alt0),
+  observador HDMI ligado, entrada HDMI original da Fresco. A confirmação “ta incrivelmente bom
+  agora” foi de fluidez, não de estabilidade longa.
+- Perfis locais em `~/Library/Application Support/fl2000-re/`: `video-mode=1024x768`,
+  `usb-wire-codec=raw`, `usb-queue-depth=2`, `usb-burst-profile=burst16`, `usb-native-sync=0`. Não
+  há `usb-transfer-bytes` nem `hdmi-input-clock`; experimentos removidos. Plist:
+  `FL2000_LINK_WATCH=1`.
+- Biblioteca ativa restaurada para libusb **1.0.29** global. Plist extend sem `DYLD_LIBRARY_PATH`. A
+  1.0.30 oficial foi compilada isoladamente em `~/Library/Caches/fl2000-re/libusb-1.0.30/`, mas o
+  teste também falhou e o override foi removido. Nenhum driver/biblioteca global foi substituído.
+- Próximo isolamento físico solicitado: mover a conexão USB para a outra porta do Mac, mantendo
+  HDMI/VGA. Ainda **sem confirmação da troca**. Dispositivo observado em endereço **5**,
+  `usb_port_path=(2,)`, IORegistry `00200000`. Não confundir com a reconexão USB-A, que o usuário já
+  confirmou.
+
+### Resultados físicos registrados
+
+- RLE/fila4/single: timeouts repetidos em 43–65s; RLE síncrono também falhou.
+- Raw/síncrono/single: perdas HDMI e timeout, inclusive com observador desligado. Usuário relatou
+  três quedas mesmo com entrega USB aparentemente saudável.
+- 50 Hz: cinco perdas HDMI em menos de um minuto; revertido a 60 Hz.
+- Raw/fila2/burst16: sessão `5ee7084a325b` falhou em 156,538s, às 22:07:06.
+- Após reconexão física: sessão fixa `5610d1e5e538`, início 22:08:57, timeout às **22:15:13**,
+  **376,157s**, pixels **854016/1572864**.
+- Raw/fila2/single: três perdas HDMI nos primeiros ~200s; revertido a burst16.
+- Entrada RGB24 alternativa (Linux seletor 0): sessão `8993462f7d13`, timeout às **22:27:45**,
+  **334,331s**, **1155072/1572864**. Experimento removido.
+- Libusb 1.0.30 isolada: sessão `5dcec4ac6501`, início 22:36:14, também falhou. Outras sessões com a
+  mesma biblioteca também falharam. Não tratá-la como reparo.
+- Blocos de 256 KiB dentro da fila de dois quadros: sessão fixa `a2082d553051`, início **22:47:09**,
+  timeout às **22:52:32**, bloco 2 **217088/262144**. Falha confirmada pelo kernel. Código/perfil do
+  experimento removidos.
+
+### Diagnóstico que permanece
+
+- `com.fl2000-re.health-monitor`: supervisor sem abrir USB. Status a cada 5s:
+  `~/Library/Logs/fl2000-re-health.json`; histórico com rotação: `fl2000-re-health-history.jsonl`.
+  Distingue entrega, transmissor, serviços, contadores por sessão e proveniência do último erro.
+  `assessment=queda_recente` persiste por 10min após falhas através de reinícios; não significa
+  imagem estável.
+- `com.fl2000-re.usb-listener`: evidências completas em `fl2000-re-faults.jsonl`. Inclui agora
+  contexto de `AppleUSBXHCI` e `IOUSBHostPort` além do endpoint alvo. Contexto do controlador pode
+  envolver outros dispositivos; não atribuir causa.
+- Erros de submissão libusb agora emitem `usb_transfer_error` mesmo sem callback; antes escapavam ao
+  coletor. Sessões registram `libusb_version` efetiva e `usb_port_path`, sem abrir/reconfigurar o
+  dispositivo para consultar versão.
+- Mudanças, relatos físicos e sessões fixas: `fl2000-re-experiments.jsonl`. Não reiniciar a contagem
+  a cada relaunch nem inferir imagem estável de USB fps.
+- **495 testes**, Ruff e Prettier passaram. Alterações ainda sem commit/PR. Não reiniciar o vídeo só
+  para documentar. Reinício controlado usa SIGINT no serviço exato; nunca `pkill`. Resolução não foi
+  reduzida em nenhum teste.
+
+## Estado anterior — 2026-10-26
 
 - HDMI **1024×768@60**, virtual **1280×960**. Não retornar a 640×480: o usuário rejeitou a qualidade
   de leitura desse perfil antigo.
